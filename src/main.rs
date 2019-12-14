@@ -9,7 +9,6 @@ use structopt::StructOpt;
 use time::Tm;
 
 #[derive(StructOpt)]
-#[structopt()]
 enum Add {
     Youtube {
         channel_name: String,
@@ -25,6 +24,12 @@ enum Add {
     },
 }
 
+#[derive(StructOpt)]
+struct Remove {
+    #[structopt(help = "Url")]
+    link: String,
+}
+
 struct Feed {
     title: String,
     url: String,
@@ -32,19 +37,26 @@ struct Feed {
 }
 
 #[derive(StructOpt)]
-#[structopt()]
+#[structopt(help = "List something")]
 enum List {
+    #[structopt(help = "List feeds")]
     Feeds,
+    #[structopt(help = "List available videos")]
     Entries,
 }
 
 #[derive(StructOpt)]
 #[structopt()]
 enum Options {
+    #[structopt(about = "Add a feed")]
     Add(Add),
     Fetch,
+    #[structopt(about = "Refresh the list of available videos")]
     Refresh,
+    #[structopt(about = "List parts of database")]
     List(List),
+    #[structopt(about = "Remove an item from the list of available videos")]
+    Remove(Remove),
 }
 
 fn youtube_url(channel: &str) -> String {
@@ -268,6 +280,14 @@ fn main() -> Result<(), Error> {
                 }
             }
         },
+        Options::Remove(remove) => {
+            conn.execute(
+                r#"
+                DELETE FROM entry WHERE link = ?1
+                "#,
+                params!(remove.link),
+            )?;
+        }
         Options::Refresh => {
             for feed in iter_feeds(&conn)? {
                 let (fid, feed) = feed.unwrap();
