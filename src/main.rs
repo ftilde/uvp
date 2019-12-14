@@ -9,12 +9,25 @@ use structopt::StructOpt;
 mod data;
 mod feeds;
 
-use feeds::fetch;
-
 use data::*;
+use feeds::fetch;
 
 #[derive(StructOpt)]
 enum Add {
+    #[structopt(about = "Add a feed")]
+    Feed(AddFeed),
+    #[structopt(about = "Add video to the list of active videos")]
+    Video(AddVideo),
+}
+
+#[derive(StructOpt)]
+struct AddVideo {
+    #[structopt(help = "Url")]
+    link: String,
+}
+
+#[derive(StructOpt)]
+enum AddFeed {
     Youtube {
         channel_name: String,
     },
@@ -38,10 +51,12 @@ struct Remove {
 #[derive(StructOpt)]
 #[structopt(help = "List something")]
 enum List {
-    #[structopt(help = "List feeds")]
+    #[structopt(about = "List feeds")]
     Feeds,
-    #[structopt(help = "List available videos")]
+    #[structopt(about = "List available videos")]
     Available,
+    #[structopt(about = "List active videos")]
+    Active,
 }
 
 #[derive(StructOpt)]
@@ -76,54 +91,6 @@ pub enum Error {
     DB(rusqlite::Error),
 }
 
-fn iter_feeds(
-    conn: &Connection,
-) -> Result<Vec<Result<(u32, Feed), rusqlite::Error>>, rusqlite::Error> {
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT feedid, title, url, lastupdate FROM feed
-        "#,
-    )?;
-    let res = stmt
-        .query_map(params!(), |row| {
-            Ok((
-                row.get(0)?,
-                Feed {
-                    title: row.get(1)?,
-                    url: row.get(2)?,
-                    lastupdate: row.get(3).map(|lastupdate: Option<String>| {
-                        lastupdate.map(|lastupdate| {
-                            time::strptime(&lastupdate, TIME_FORMAT_RFC3339).unwrap()
-                        })
-                    })?,
-                },
-            ))
-        })?
-        .collect();
-    Ok(res)
-}
-
-fn iter_available(
-    conn: &Connection,
-) -> Result<Vec<Result<Available, rusqlite::Error>>, rusqlite::Error> {
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT title, link, publication FROM available
-        "#,
-    )?;
-    let res = stmt
-        .query_map(params!(), |row| {
-            let publication: String = row.get(2)?;
-            Ok(Available {
-                title: row.get(0)?,
-                link: row.get(1)?,
-                publication: time::strptime(&publication, TIME_FORMAT_RFC3339).unwrap(),
-            })
-        })?
-        .collect();
-    Ok(res)
-}
-
 fn main() -> Result<(), Error> {
     let db_path = dirs::data_dir()
         .unwrap_or(Path::new("./").to_owned())
@@ -136,9 +103,17 @@ fn main() -> Result<(), Error> {
         conn.execute(def, params![])?;
     }
     match Options::from_args() {
-        Options::Add(add) => {
+        Options::Add(Add::Video(vid)) => {
+            if let Some(available) = find_in_available(&conn, &vid.link)? {
+                add_to_active(&conn, &vid.link, &available.title)?;
+                remove_from_available(&conn, &vid.link)?;
+            } else {
+                add_to_active(&conn, &vid.link, &vid.link)?;
+            }
+        }
+        Options::Add(Add::Feed(add)) => {
             let feed = match add {
-                Add::Youtube { channel_name } => {
+                AddFeed::Youtube { channel_name } => {
                     let url = youtube_url(&channel_name);
                     Feed {
                         title: channel_name,
@@ -146,7 +121,7 @@ fn main() -> Result<(), Error> {
                         lastupdate: None,
                     }
                 }
-                Add::Mediathek { query } => {
+                AddFeed::Mediathek { query } => {
                     let url = mediathek_url(&query);
                     Feed {
                         title: query,
@@ -154,18 +129,13 @@ fn main() -> Result<(), Error> {
                         lastupdate: None,
                     }
                 }
-                Add::Other { title, url } => Feed {
+                AddFeed::Other { title, url } => Feed {
                     title,
                     url,
                     lastupdate: None,
                 },
             };
-            conn.execute(
-                r#"
-                INSERT INTO feed (title, url) VALUES (?1, ?2)
-                "#,
-                params!(feed.title, feed.url),
-            )?;
+            add_to_feed(&conn, &feed)?;
         }
         Options::Fetch => {
             for feed in iter_feeds(&conn)? {
@@ -178,7 +148,7 @@ fn main() -> Result<(), Error> {
                         "Available {}, url {}, publication {}",
                         entry.title,
                         entry.link,
-                        entry.publication.strftime(TIME_FORMAT_RFC3339).unwrap()
+                        entry.publication.to_rfc3339(),
                     );
                 }
             }
@@ -192,7 +162,7 @@ fn main() -> Result<(), Error> {
                         feed.title,
                         feed.url,
                         feed.lastupdate
-                            .map(|lu| lu.strftime(TIME_FORMAT_RFC3339).unwrap().to_string())
+                            .map(|lu| lu.to_rfc3339())
                             .unwrap_or("Never".to_owned())
                     );
                 }
@@ -204,18 +174,19 @@ fn main() -> Result<(), Error> {
                         "Entry {}, url {}, publication {}",
                         entry.title,
                         entry.link,
-                        entry.publication.strftime(TIME_FORMAT_RFC3339).unwrap()
+                        entry.publication.to_rfc3339()
                     );
+                }
+            }
+            List::Active => {
+                for entry in iter_active(&conn)? {
+                    let entry = entry.unwrap();
+                    println!("Entry {}, url {}", entry.title, entry.link,);
                 }
             }
         },
         Options::Remove(remove) => {
-            conn.execute(
-                r#"
-                DELETE FROM entry WHERE link = ?1
-                "#,
-                params!(remove.link),
-            )?;
+            remove_from_available(&conn, &remove.link)?;
         }
         Options::Refresh => {
             for feed in iter_feeds(&conn)? {
@@ -228,21 +199,7 @@ fn main() -> Result<(), Error> {
                     // due to < and not <=. However, <= tries to insert the latest already present
                     // entry again.
                     if feed.lastupdate.is_none() || feed.lastupdate.unwrap() < entry.publication {
-                        conn.execute(
-                            r#"
-                            INSERT INTO entry (title, link, feedid, publication) VALUES (?1, ?2, ?3, ?4)
-                            "#,
-                            params!(
-                                entry.title,
-                                entry.link,
-                                fid,
-                                entry
-                                    .publication
-                                    .strftime(TIME_FORMAT_RFC3339)
-                                    .unwrap()
-                                    .to_string()
-                            ),
-                        )?;
+                        add_to_available(&conn, fid, &entry)?;
                     }
                     lastpublication = if let Some(lastpublication) = lastpublication {
                         Some(entry.publication.max(lastpublication))
@@ -255,13 +212,7 @@ fn main() -> Result<(), Error> {
                         r#"
                         UPDATE feed SET lastupdate = ?1 WHERE feedid = ?2
                         "#,
-                        params!(
-                            lastpublication
-                                .strftime(TIME_FORMAT_RFC3339)
-                                .unwrap()
-                                .to_string(),
-                            fid
-                        ),
+                        params!(lastpublication.to_rfc3339(), fid),
                     )?;
                 }
             }

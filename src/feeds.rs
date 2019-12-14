@@ -1,6 +1,6 @@
 use crate::data::Available;
-use crate::data::TIME_FORMAT_RFC3339;
 use atom_syndication;
+use chrono::{DateTime, FixedOffset};
 use rss;
 
 use std::str::FromStr;
@@ -10,6 +10,13 @@ use crate::Error;
 pub enum FeedEntries {
     Atom(Box<atom_syndication::Feed>),
     RSS(Box<rss::Channel>),
+}
+
+fn parse_time(s: &str) -> chrono::ParseResult<DateTime<FixedOffset>> {
+    if let Ok(r) = DateTime::parse_from_rfc2822(s) {
+        return Ok(r);
+    }
+    DateTime::parse_from_rfc3339(s)
 }
 
 impl FeedEntries {
@@ -25,14 +32,14 @@ fn entry_from_atom(entry: &atom_syndication::Entry) -> Option<Available> {
     Some(Available {
         title: entry.title().to_owned(),
         link: entry.links().first()?.href().to_owned(),
-        publication: time::strptime(entry.published()?, TIME_FORMAT_RFC3339).unwrap(),
+        publication: parse_time(entry.published()?).unwrap(),
     })
 }
 fn entry_from_rss(entry: &rss::Item) -> Option<Available> {
     Some(Available {
         title: entry.title()?.to_owned(),
         link: entry.link()?.to_owned(),
-        publication: time::strptime(entry.pub_date()?, TIME_FORMAT_RFC3339).unwrap(),
+        publication: parse_time(entry.pub_date()?).unwrap(),
     })
 }
 
