@@ -142,46 +142,50 @@ fn main() -> Result<(), Error> {
                 let (_, feed) = feed.unwrap();
 
                 println!("Feed {}", feed.title);
+                println!("{} \t| {} \t| {}", "Title", "Publication", "Link");
                 let feed = fetch(&feed.url).unwrap();
                 for entry in feed.entries() {
                     println!(
-                        "Available {}, url {}, publication {}",
+                        "{} \t| {} \t| \"{}\"",
                         entry.title,
-                        entry.link,
                         entry.publication.to_rfc3339(),
+                        entry.link,
                     );
                 }
             }
         }
         Options::List(what) => match what {
             List::Feeds => {
+                println!("{} \t| {} \t| {}", "Title", "Last Update", "Url");
                 for feed in iter_feeds(&conn)? {
                     let (_, feed) = feed.unwrap();
                     println!(
-                        "Feed {}, url {}, last update: {}",
+                        "{} \t| {} \t| {}",
                         feed.title,
-                        feed.url,
                         feed.lastupdate
                             .map(|lu| lu.to_rfc3339())
-                            .unwrap_or("Never".to_owned())
+                            .unwrap_or("Never".to_owned()),
+                        feed.url,
                     );
                 }
             }
             List::Available => {
+                println!("{} \t| {} \t| {}", "Title", "Publication", "Url");
                 for entry in iter_available(&conn)? {
                     let entry = entry.unwrap();
                     println!(
-                        "Entry {}, url {}, publication {}",
+                        "{} \t| {} \t| {}",
                         entry.title,
+                        entry.publication.to_rfc3339(),
                         entry.link,
-                        entry.publication.to_rfc3339()
                     );
                 }
             }
             List::Active => {
+                println!("{} \t| {}", "Title", "Url");
                 for entry in iter_active(&conn)? {
                     let entry = entry.unwrap();
-                    println!("Entry {}, url {}", entry.title, entry.link,);
+                    println!("{} \t| {}", entry.title, entry.link,);
                 }
             }
         },
