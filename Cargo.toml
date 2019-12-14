@@ -1,0 +1,14 @@
+[package]
+name = "umc"
+version = "0.1.0"
+authors = ["ftilde <ftilde@protonmail.com>"]
+edition = "2018"
+
+[dependencies]
+reqwest = "0.9"
+structopt = "0.3"
+rss = "1.7"
+atom_syndication = "0.6"
+derive_more = "0.14"
+rusqlite = "0.21"
+dirs = "2"
