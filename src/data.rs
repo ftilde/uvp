@@ -195,3 +195,12 @@ pub fn add_to_active(conn: &Connection, url: &str, title: &str) -> Result<(), ru
     )?;
     Ok(())
 }
+
+pub fn make_active(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> {
+    if let Some(available) = find_in_available(&conn, url)? {
+        add_to_active(&conn, &url, &available.title)?;
+        remove_from_available(&conn, url)
+    } else {
+        add_to_active(&conn, url, url)
+    }
+}

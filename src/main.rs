@@ -81,6 +81,17 @@ fn mediathek_url(channel: &str) -> String {
     format!("https://mediathekviewweb.de/feed?query={}", channel)
 }
 
+fn ignore_constraint_errors(res: Result<(), rusqlite::Error>) -> Result<(), rusqlite::Error> {
+    match res {
+        Err(rusqlite::Error::SqliteFailure(error, _))
+            if error.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
+            Ok(())
+        }
+        o => o,
+    }
+}
+
 const DB_NAME: &'static str = "umc.db";
 
 #[derive(From, Debug)]
@@ -104,12 +115,7 @@ fn main() -> Result<(), Error> {
     }
     match Options::from_args() {
         Options::Add(Add::Video(vid)) => {
-            if let Some(available) = find_in_available(&conn, &vid.link)? {
-                add_to_active(&conn, &vid.link, &available.title)?;
-                remove_from_available(&conn, &vid.link)?;
-            } else {
-                add_to_active(&conn, &vid.link, &vid.link)?;
-            }
+            make_active(&conn, &vid.link)?;
         }
         Options::Add(Add::Feed(add)) => {
             let feed = match add {
@@ -199,11 +205,8 @@ fn main() -> Result<(), Error> {
                 let mut lastpublication = feed.lastupdate;
 
                 for entry in fetch(&feed.url).unwrap().entries() {
-                    // FIXME: might swallow entries if entries have identical publication dates
-                    // due to < and not <=. However, <= tries to insert the latest already present
-                    // entry again.
                     if feed.lastupdate.is_none() || feed.lastupdate.unwrap() < entry.publication {
-                        add_to_available(&conn, fid, &entry)?;
+                        ignore_constraint_errors(add_to_available(&conn, fid, &entry))?;
                     }
                     lastpublication = if let Some(lastpublication) = lastpublication {
                         Some(entry.publication.max(lastpublication))
