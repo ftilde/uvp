@@ -43,8 +43,14 @@ enum AddFeed {
 }
 
 #[derive(StructOpt)]
+struct Play {
+    #[structopt(help = "url")]
+    link: String,
+}
+
+#[derive(StructOpt)]
 struct Remove {
-    #[structopt(help = "Url")]
+    #[structopt(help = "url")]
     link: String,
 }
 
@@ -69,6 +75,8 @@ enum Options {
     Refresh,
     #[structopt(about = "List parts of database")]
     List(List),
+    #[structopt(about = "Play a video")]
+    Play(Play),
     #[structopt(about = "Remove an item from the list of available videos")]
     Remove(Remove),
 }
@@ -116,6 +124,36 @@ fn main() -> Result<(), Error> {
     match Options::from_args() {
         Options::Add(Add::Video(vid)) => {
             make_active(&conn, &vid.link)?;
+        }
+        Options::Play(play) => {
+            ignore_constraint_errors(make_active(&conn, &play.link))?;
+
+            let tmp_dir = tempfile::tempdir().unwrap();
+
+            let pipe_path = tmp_dir.path().join("mpv.pipe");
+
+            let mut output = std::process::Command::new("mpv")
+                .arg(&play.link)
+                .arg("--input-ipc-server")
+                .arg(&pipe_path)
+                .spawn()
+                .unwrap();
+            while !pipe_path.exists() {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            let mut mpv = mpvipc::Mpv::connect(pipe_path.as_path().to_str().unwrap()).unwrap();
+
+            mpv.observe_property(&0, "playback-time").unwrap();
+            let mut playback_time = 0.0;
+            while let Ok(e) = mpv.event_listen() {
+                if let mpvipc::Event::PropertyChange { property, .. } = e {
+                    if let mpvipc::Property::PlaybackTime(Some(t)) = property {
+                        playback_time = t;
+                    }
+                }
+            }
+            println!("end at {}", playback_time);
+            output.wait().unwrap();
         }
         Options::Add(Add::Feed(add)) => {
             let feed = match add {
