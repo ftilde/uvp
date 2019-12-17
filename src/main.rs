@@ -127,15 +127,17 @@ fn main() -> Result<(), Error> {
         }
         Options::Play(play) => {
             ignore_constraint_errors(make_active(&conn, &play.link))?;
+            let active = find_in_active(&conn, &play.link)?.unwrap();
 
             let tmp_dir = tempfile::tempdir().unwrap();
 
             let pipe_path = tmp_dir.path().join("mpv.pipe");
 
             let mut output = std::process::Command::new("mpv")
-                .arg(&play.link)
+                .arg(&active.link)
                 .arg("--input-ipc-server")
                 .arg(&pipe_path)
+                .arg(format!("--start=+{}", active.playbackpos))
                 .spawn()
                 .unwrap();
             while !pipe_path.exists() {
@@ -152,7 +154,7 @@ fn main() -> Result<(), Error> {
                     }
                 }
             }
-            println!("end at {}", playback_time);
+            set_playbackpos(&conn, &active.link, playback_time)?;
             output.wait().unwrap();
         }
         Options::Add(Add::Feed(add)) => {
@@ -226,10 +228,13 @@ fn main() -> Result<(), Error> {
                 }
             }
             List::Active => {
-                println!("{} \t| {}", "Title", "Url");
+                println!("{} \t| {} \t| {}", "Title", "Url", "Playback");
                 for entry in iter_active(&conn)? {
                     let entry = entry.unwrap();
-                    println!("{} \t| {}", entry.title, entry.link,);
+                    println!(
+                        "{} \t| {} \t {}",
+                        entry.title, entry.link, entry.playbackpos
+                    );
                 }
             }
         },

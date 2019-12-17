@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection};
 
-pub type DateTime = chrono::DateTime<chrono::FixedOffset>;
+pub type DateTime = chrono::DateTime<chrono::FixedOffset>; //TODO use UTC, rusqlite has direct support for it
 
 fn parse(s: &str) -> chrono::ParseResult<DateTime> {
     DateTime::parse_from_rfc3339(s)
@@ -12,13 +12,15 @@ fn to_string(d: &DateTime) -> String {
 const TABLE_DEFINITION_ACTIVE: &'static str = r#"
 CREATE TABLE IF NOT EXISTS active (
     link           TEXT PRIMARY KEY,
-    title          TEXT NOT NULL
+    title          TEXT NOT NULL,
+    playbackpos    FLOAT NOT NULL
 );
 "#;
 #[derive(Debug)]
 pub struct Active {
     pub title: String,
     pub link: String,
+    pub playbackpos: f64,
 }
 
 const TABLE_DEFINITION_AVAILABLE: &'static str = r#"
@@ -172,7 +174,7 @@ pub fn iter_active(
 ) -> Result<Vec<Result<Active, rusqlite::Error>>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, link FROM active
+        SELECT title, link, playbackpos FROM active
         "#,
     )?;
     let res = stmt
@@ -180,16 +182,34 @@ pub fn iter_active(
             Ok(Active {
                 title: row.get(0)?,
                 link: row.get(1)?,
+                playbackpos: row.get(2)?,
             })
         })?
         .collect();
     Ok(res)
 }
 
+pub fn find_in_active(conn: &Connection, url: &str) -> Result<Option<Active>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT title, link, playbackpos FROM active WHERE link = ?1
+        "#,
+    )?;
+    let res = stmt.query_map(params!(url), |row| {
+        Ok(Active {
+            title: row.get(0)?,
+            link: row.get(1)?,
+            playbackpos: row.get(2)?,
+        })
+    })?;
+    let mut iter = res.into_iter();
+    Ok(iter.next().transpose()?)
+}
+
 pub fn add_to_active(conn: &Connection, url: &str, title: &str) -> Result<(), rusqlite::Error> {
     conn.execute(
         r#"
-        INSERT INTO active (link, title) VALUES (?1, ?2)
+        INSERT INTO active (link, title, playbackpos) VALUES (?1, ?2, 0)
         "#,
         params!(url, title),
     )?;
@@ -203,4 +223,17 @@ pub fn make_active(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> 
     } else {
         add_to_active(&conn, url, url)
     }
+}
+pub fn set_playbackpos(
+    conn: &Connection,
+    url: &str,
+    playbackpos: f64,
+) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        r#"
+        UPDATE active SET playbackpos = ?1 WHERE link = ?2
+        "#,
+        params!(playbackpos, url),
+    )?;
+    Ok(())
 }
