@@ -169,9 +169,7 @@ pub fn add_to_available(
 
 /// Active ---------------------------------------------------------------------
 
-pub fn iter_active(
-    conn: &Connection,
-) -> Result<Vec<Result<Active, rusqlite::Error>>, rusqlite::Error> {
+pub fn iter_active(conn: &Connection) -> Result<Vec<Active>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
         SELECT title, link, playbackpos FROM active
@@ -185,8 +183,8 @@ pub fn iter_active(
                 playbackpos: row.get(2)?,
             })
         })?
-        .collect();
-    Ok(res)
+        .collect::<Result<Vec<_>, rusqlite::Error>>();
+    res
 }
 
 pub fn find_in_active(conn: &Connection, url: &str) -> Result<Option<Active>, rusqlite::Error> {

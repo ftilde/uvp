@@ -8,6 +8,7 @@ use structopt::StructOpt;
 
 mod data;
 mod feeds;
+mod tui;
 
 use data::*;
 use feeds::fetch;
@@ -79,6 +80,8 @@ enum Options {
     Play(Play),
     #[structopt(about = "Remove an item from the list of available videos")]
     Remove(Remove),
+    #[structopt(about = "Start an interactive tui for video selection")]
+    Tui,
 }
 
 fn youtube_url(channel: &str) -> String {
@@ -108,6 +111,34 @@ pub enum Error {
     RSS(rss::Error),
     Atom(atom_syndication::Error),
     DB(rusqlite::Error),
+}
+
+fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
+    for feed in iter_feeds(&conn)? {
+        let (fid, feed) = feed.unwrap();
+
+        let mut lastpublication = feed.lastupdate;
+
+        for entry in fetch(&feed.url).unwrap().entries() {
+            if feed.lastupdate.is_none() || feed.lastupdate.unwrap() < entry.publication {
+                ignore_constraint_errors(add_to_available(&conn, fid, &entry))?;
+            }
+            lastpublication = if let Some(lastpublication) = lastpublication {
+                Some(entry.publication.max(lastpublication))
+            } else {
+                Some(entry.publication)
+            }
+        }
+        if let Some(lastpublication) = lastpublication {
+            conn.execute(
+                r#"
+                UPDATE feed SET lastupdate = ?1 WHERE feedid = ?2
+                "#,
+                params!(lastpublication.to_rfc3339(), fid),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn main() -> Result<(), Error> {
@@ -230,7 +261,6 @@ fn main() -> Result<(), Error> {
             List::Active => {
                 println!("{} \t| {} \t| {}", "Title", "Url", "Playback");
                 for entry in iter_active(&conn)? {
-                    let entry = entry.unwrap();
                     println!(
                         "{} \t| {} \t {}",
                         entry.title, entry.link, entry.playbackpos
@@ -242,30 +272,11 @@ fn main() -> Result<(), Error> {
             remove_from_available(&conn, &remove.link)?;
         }
         Options::Refresh => {
-            for feed in iter_feeds(&conn)? {
-                let (fid, feed) = feed.unwrap();
-
-                let mut lastpublication = feed.lastupdate;
-
-                for entry in fetch(&feed.url).unwrap().entries() {
-                    if feed.lastupdate.is_none() || feed.lastupdate.unwrap() < entry.publication {
-                        ignore_constraint_errors(add_to_available(&conn, fid, &entry))?;
-                    }
-                    lastpublication = if let Some(lastpublication) = lastpublication {
-                        Some(entry.publication.max(lastpublication))
-                    } else {
-                        Some(entry.publication)
-                    }
-                }
-                if let Some(lastpublication) = lastpublication {
-                    conn.execute(
-                        r#"
-                        UPDATE feed SET lastupdate = ?1 WHERE feedid = ?2
-                        "#,
-                        params!(lastpublication.to_rfc3339(), fid),
-                    )?;
-                }
-            }
+            refresh(&conn)?;
+        }
+        Options::Tui => {
+            refresh(&conn)?;
+            tui::run(iter_active(&conn)?.into_iter());
         }
     }
     Ok(())
