@@ -141,6 +141,40 @@ fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+pub fn play(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> {
+    ignore_constraint_errors(make_active(conn, url))?;
+    let active = find_in_active(conn, url)?.unwrap();
+
+    let tmp_dir = tempfile::tempdir().unwrap();
+
+    let pipe_path = tmp_dir.path().join("mpv.pipe");
+
+    let mut output = std::process::Command::new("mpv")
+        .arg(&active.link)
+        .arg("--input-ipc-server")
+        .arg(&pipe_path)
+        .arg(format!("--start=+{}", active.playbackpos))
+        .spawn()
+        .unwrap();
+    while !pipe_path.exists() {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let mut mpv = mpvipc::Mpv::connect(pipe_path.as_path().to_str().unwrap()).unwrap();
+
+    mpv.observe_property(&0, "playback-time").unwrap();
+    let mut playback_time = 0.0;
+    while let Ok(e) = mpv.event_listen() {
+        if let mpvipc::Event::PropertyChange { property, .. } = e {
+            if let mpvipc::Property::PlaybackTime(Some(t)) = property {
+                playback_time = t;
+            }
+        }
+    }
+    set_playbackpos(&conn, &active.link, playback_time)?;
+    output.wait().unwrap();
+    Ok(())
+}
+
 fn main() -> Result<(), Error> {
     let db_path = dirs::data_dir()
         .unwrap_or(Path::new("./").to_owned())
@@ -156,37 +190,8 @@ fn main() -> Result<(), Error> {
         Options::Add(Add::Video(vid)) => {
             make_active(&conn, &vid.link)?;
         }
-        Options::Play(play) => {
-            ignore_constraint_errors(make_active(&conn, &play.link))?;
-            let active = find_in_active(&conn, &play.link)?.unwrap();
-
-            let tmp_dir = tempfile::tempdir().unwrap();
-
-            let pipe_path = tmp_dir.path().join("mpv.pipe");
-
-            let mut output = std::process::Command::new("mpv")
-                .arg(&active.link)
-                .arg("--input-ipc-server")
-                .arg(&pipe_path)
-                .arg(format!("--start=+{}", active.playbackpos))
-                .spawn()
-                .unwrap();
-            while !pipe_path.exists() {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            let mut mpv = mpvipc::Mpv::connect(pipe_path.as_path().to_str().unwrap()).unwrap();
-
-            mpv.observe_property(&0, "playback-time").unwrap();
-            let mut playback_time = 0.0;
-            while let Ok(e) = mpv.event_listen() {
-                if let mpvipc::Event::PropertyChange { property, .. } = e {
-                    if let mpvipc::Property::PlaybackTime(Some(t)) = property {
-                        playback_time = t;
-                    }
-                }
-            }
-            set_playbackpos(&conn, &active.link, playback_time)?;
-            output.wait().unwrap();
+        Options::Play(p) => {
+            play(&conn, &p.link)?;
         }
         Options::Add(Add::Feed(add)) => {
             let feed = match add {
@@ -249,7 +254,6 @@ fn main() -> Result<(), Error> {
             List::Available => {
                 println!("{} \t| {} \t| {}", "Title", "Publication", "Url");
                 for entry in iter_available(&conn)? {
-                    let entry = entry.unwrap();
                     println!(
                         "{} \t| {} \t| {}",
                         entry.title,
@@ -276,7 +280,7 @@ fn main() -> Result<(), Error> {
         }
         Options::Tui => {
             refresh(&conn)?;
-            tui::run(iter_active(&conn)?.into_iter());
+            tui::run(&conn)?;
         }
     }
     Ok(())

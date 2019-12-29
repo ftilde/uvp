@@ -95,9 +95,7 @@ pub fn add_to_feed(conn: &Connection, feed: &Feed) -> Result<(), rusqlite::Error
 }
 
 /// Available ------------------------------------------------------------------
-pub fn iter_available(
-    conn: &Connection,
-) -> Result<Vec<Result<Available, rusqlite::Error>>, rusqlite::Error> {
+pub fn iter_available(conn: &Connection) -> Result<Vec<Available>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
         SELECT title, link, publication FROM available
@@ -112,8 +110,8 @@ pub fn iter_available(
                 publication: parse(&publication).unwrap(),
             })
         })?
-        .collect();
-    Ok(res)
+        .collect::<Result<Vec<_>, rusqlite::Error>>();
+    res
 }
 
 pub fn find_in_available(
