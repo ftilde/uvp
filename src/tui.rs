@@ -4,12 +4,10 @@ use crate::data::make_active;
 use rusqlite::Connection;
 use signal_hook::iterator::Signals;
 use unsegen::base::{Color, GraphemeCluster, StyleModifier, Window};
-use unsegen::container::Container;
-use unsegen::container::ContainerProvider;
-use unsegen::container::{ContainerManager, HSplit, Leaf};
+use unsegen::container::{Container, ContainerManager, ContainerProvider, HSplit, Leaf};
 use unsegen::input::{Input, Key, NavigateBehavior};
 use unsegen::widget::builtin::{Column, LineLabel, Table, TableRow};
-use unsegen::widget::{Demand2D, RenderingHints, SeparatingStyle, Widget};
+use unsegen::widget::{ColDemand, Demand2D, RenderingHints, RowDemand, SeparatingStyle, Widget};
 
 use chrono::Duration;
 
@@ -29,6 +27,19 @@ fn format_time(mut duration: Duration) -> String {
     let millis = duration.num_milliseconds();
     format!("{}{:>2}:{:02}.{:03}", prefix, minutes, seconds, millis)
 }
+
+struct Padding;
+impl Widget for Padding {
+    fn space_demand(&self) -> Demand2D {
+        Demand2D {
+            width: ColDemand::at_least(0),
+            height: RowDemand::exact(0),
+        }
+    }
+
+    fn draw(&self, _win: Window, _hints: RenderingHints) {}
+}
+
 struct HighlightLabel {
     inner: LineLabel,
 }
@@ -63,6 +74,7 @@ struct ActiveRow {
     title: HighlightLabel,
     url: String,
     time: HighlightLabel,
+    padding: Padding,
 }
 
 impl TableRow for ActiveRow {
@@ -75,6 +87,11 @@ impl TableRow for ActiveRow {
         Column {
             access: |r| &r.time,
             access_mut: |r| &mut r.time,
+            behavior: |_, i| Some(i),
+        },
+        Column {
+            access: |r| &r.padding,
+            access_mut: |r| &mut r.padding,
             behavior: |_, i| Some(i),
         },
     ];
@@ -109,6 +126,7 @@ impl ActiveTable {
                 time: HighlightLabel::new(format_time(Duration::milliseconds(
                     (active.playbackpos * 1_000.0) as i64,
                 ))),
+                padding: Padding,
             });
         }
     }
@@ -151,10 +169,16 @@ struct AvailableRow {
     title: HighlightLabel,
     url: String,
     publication: HighlightLabel,
+    padding: Padding,
 }
 
 impl TableRow for AvailableRow {
     const COLUMNS: &'static [Column<AvailableRow>] = &[
+        Column {
+            access: |r| &r.padding,
+            access_mut: |r| &mut r.padding,
+            behavior: |_, i| Some(i),
+        },
         Column {
             access: |r| &r.title,
             access_mut: |r| &mut r.title,
@@ -227,6 +251,7 @@ impl AvailableTable {
                 title: HighlightLabel::new(available.title),
                 url: available.link,
                 publication: HighlightLabel::new(available.publication.to_rfc3339()),
+                padding: Padding,
             });
         }
     }
