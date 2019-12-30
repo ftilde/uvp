@@ -239,6 +239,7 @@ enum Msg {
 enum TuiMsg {
     Play(String),
     MakeActive(String),
+    Refresh,
 }
 
 struct Tui {
@@ -352,6 +353,9 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
                 Msg::Input(input) => {
                     input
                         .chain((Key::Char('q'), || run = false))
+                        .chain((Key::Char('r'), || {
+                            work_sender.send(TuiMsg::Refresh).unwrap()
+                        }))
                         .chain(manager.active_container_behavior(&mut tui, &mut work_sender))
                         .chain(
                             NavigateBehavior::new(&mut manager.navigatable(&mut tui))
@@ -370,11 +374,14 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
                     term.leave_tui().unwrap();
                     crate::play(conn, &url)?;
                     term.enter_tui().unwrap();
-                    tui.update(&conn)?;
+                    tui.update(conn)?;
                 }
                 TuiMsg::MakeActive(url) => {
                     make_active(conn, &url)?;
-                    tui.update(&conn)?;
+                    tui.update(conn)?;
+                }
+                TuiMsg::Refresh => {
+                    tui.update(conn)?;
                 }
             }
         }
@@ -385,4 +392,9 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
         }
     }
     Ok(())
+
+    //TODO
+    //fix tui layout
+    //add video length
+    //add remove/undo
 }
