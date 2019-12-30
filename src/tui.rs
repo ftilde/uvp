@@ -1,13 +1,16 @@
-use crate::data::iter_active;
-use crate::data::iter_available;
-use crate::data::make_active;
+use crate::data::{
+    add_to_active, add_to_available, iter_active, iter_available, make_active, remove_from_active,
+    remove_from_available,
+};
 use rusqlite::Connection;
 use signal_hook::iterator::Signals;
 use unsegen::base::{Color, GraphemeCluster, StyleModifier, Window};
 use unsegen::container::{Container, ContainerManager, ContainerProvider, HSplit, Leaf};
 use unsegen::input::{Input, Key, NavigateBehavior};
-use unsegen::widget::builtin::{Column, LineLabel, Table, TableRow};
-use unsegen::widget::{ColDemand, Demand2D, RenderingHints, RowDemand, SeparatingStyle, Widget};
+use unsegen::widget::{
+    builtin::{Column, LineLabel, Table, TableRow},
+    ColDemand, Demand2D, RenderingHints, RowDemand, SeparatingStyle, Widget,
+};
 
 use chrono::Duration;
 
@@ -72,9 +75,9 @@ impl Widget for HighlightLabel {
 
 struct ActiveRow {
     title: HighlightLabel,
-    url: String,
     time: HighlightLabel,
     padding: Padding,
+    data: Active,
 }
 
 impl TableRow for ActiveRow {
@@ -99,6 +102,7 @@ impl TableRow for ActiveRow {
 
 struct ActiveTable {
     table: Table<ActiveRow>,
+    deleted: Vec<Active>,
 }
 
 impl ActiveTable {
@@ -111,6 +115,7 @@ impl ActiveTable {
                 SeparatingStyle::Draw(GraphemeCluster::try_from('|').unwrap()),
                 StyleModifier::new(),
             ),
+            deleted: Vec::new(),
         };
         tui.update(active);
         tui
@@ -121,12 +126,12 @@ impl ActiveTable {
         rows.clear();
         for active in active {
             rows.push(ActiveRow {
-                title: HighlightLabel::new(active.title),
-                url: active.link,
+                title: HighlightLabel::new(active.title.clone()),
                 time: HighlightLabel::new(format_time(Duration::milliseconds(
                     (active.playbackpos * 1_000.0) as i64,
                 ))),
                 padding: Padding,
+                data: active,
             });
         }
     }
@@ -151,7 +156,18 @@ impl Container<<Tui as ContainerProvider>::Parameters> for ActiveTable {
         input
             .chain((Key::Char('\n'), || {
                 if let Some(row) = self.table.current_row_mut() {
-                    sender.send(TuiMsg::Play(row.url.clone())).unwrap();
+                    sender.send(TuiMsg::Play(row.data.url.clone())).unwrap();
+                }
+            }))
+            .chain((Key::Char('d'), || {
+                if let Some(row) = self.table.current_row() {
+                    self.deleted.push(row.data.clone());
+                    sender.send(TuiMsg::Delete(row.data.url.clone())).unwrap();
+                }
+            }))
+            .chain((Key::Char('u'), || {
+                if let Some(a) = self.deleted.pop() {
+                    sender.send(TuiMsg::AddActive(a)).unwrap();
                 }
             }))
             .chain(
@@ -167,18 +183,12 @@ impl Container<<Tui as ContainerProvider>::Parameters> for ActiveTable {
 
 struct AvailableRow {
     title: HighlightLabel,
-    url: String,
     publication: HighlightLabel,
-    padding: Padding,
+    data: Available,
 }
 
 impl TableRow for AvailableRow {
     const COLUMNS: &'static [Column<AvailableRow>] = &[
-        Column {
-            access: |r| &r.padding,
-            access_mut: |r| &mut r.padding,
-            behavior: |_, i| Some(i),
-        },
         Column {
             access: |r| &r.title,
             access_mut: |r| &mut r.title,
@@ -194,6 +204,7 @@ impl TableRow for AvailableRow {
 
 struct AvailableTable {
     table: Table<AvailableRow>,
+    deleted: Vec<Available>,
 }
 
 impl Container<<Tui as ContainerProvider>::Parameters> for AvailableTable {
@@ -204,8 +215,21 @@ impl Container<<Tui as ContainerProvider>::Parameters> for AvailableTable {
     ) -> Option<Input> {
         input
             .chain((Key::Char('\n'), || {
-                if let Some(row) = self.table.current_row_mut() {
-                    sender.send(TuiMsg::MakeActive(row.url.clone())).unwrap();
+                if let Some(row) = self.table.current_row() {
+                    sender
+                        .send(TuiMsg::MakeActive(row.data.url.clone()))
+                        .unwrap();
+                }
+            }))
+            .chain((Key::Char('d'), || {
+                if let Some(row) = self.table.current_row() {
+                    self.deleted.push(row.data.clone());
+                    sender.send(TuiMsg::Delete(row.data.url.clone())).unwrap();
+                }
+            }))
+            .chain((Key::Char('u'), || {
+                if let Some(a) = self.deleted.pop() {
+                    sender.send(TuiMsg::AddAvailable(a)).unwrap();
                 }
             }))
             .chain(
@@ -239,6 +263,7 @@ impl AvailableTable {
                 SeparatingStyle::Draw(GraphemeCluster::try_from('|').unwrap()),
                 StyleModifier::new(),
             ),
+            deleted: Vec::new(),
         };
         tui.update(available);
         tui
@@ -248,10 +273,9 @@ impl AvailableTable {
         rows.clear();
         for available in available {
             rows.push(AvailableRow {
-                title: HighlightLabel::new(available.title),
-                url: available.link,
+                title: HighlightLabel::new(available.title.clone()),
                 publication: HighlightLabel::new(available.publication.to_rfc3339()),
-                padding: Padding,
+                data: available,
             });
         }
     }
@@ -264,6 +288,9 @@ enum Msg {
 enum TuiMsg {
     Play(String),
     MakeActive(String),
+    Delete(String),
+    AddActive(Active),
+    AddAvailable(Available),
     Refresh,
 }
 
@@ -406,6 +433,19 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
                 TuiMsg::Refresh => {
                     tui.update(conn)?;
                 }
+                TuiMsg::Delete(url) => {
+                    remove_from_active(conn, &url)?;
+                    remove_from_available(conn, &url)?;
+                    tui.update(conn)?;
+                }
+                TuiMsg::AddAvailable(a) => {
+                    add_to_available(conn, None, &a)?;
+                    tui.update(conn)?;
+                }
+                TuiMsg::AddActive(a) => {
+                    add_to_active(conn, &a)?;
+                    tui.update(conn)?;
+                }
             }
         }
         {
@@ -419,5 +459,4 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
     //TODO
     //fix tui layout
     //add video length
-    //add remove/undo
 }

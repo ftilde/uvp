@@ -24,7 +24,7 @@ enum Add {
 #[derive(StructOpt)]
 struct AddVideo {
     #[structopt(help = "Url")]
-    link: String,
+    url: String,
 }
 
 #[derive(StructOpt)]
@@ -46,13 +46,13 @@ enum AddFeed {
 #[derive(StructOpt)]
 struct Play {
     #[structopt(help = "url")]
-    link: String,
+    url: String,
 }
 
 #[derive(StructOpt)]
 struct Remove {
     #[structopt(help = "url")]
-    link: String,
+    url: String,
 }
 
 #[derive(StructOpt)]
@@ -121,7 +121,7 @@ fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
 
         for entry in fetch(&feed.url).unwrap().entries() {
             if feed.lastupdate.is_none() || feed.lastupdate.unwrap() < entry.publication {
-                ignore_constraint_errors(add_to_available(&conn, fid, &entry))?;
+                ignore_constraint_errors(add_to_available(&conn, Some(fid), &entry))?;
             }
             lastpublication = if let Some(lastpublication) = lastpublication {
                 Some(entry.publication.max(lastpublication))
@@ -150,7 +150,7 @@ pub fn play(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> {
     let pipe_path = tmp_dir.path().join("mpv.pipe");
 
     let mut output = std::process::Command::new("mpv")
-        .arg(&active.link)
+        .arg(&active.url)
         .arg("--input-ipc-server")
         .arg(&pipe_path)
         .arg(format!("--start=+{}", active.playbackpos))
@@ -170,7 +170,7 @@ pub fn play(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> {
             }
         }
     }
-    set_playbackpos(&conn, &active.link, playback_time)?;
+    set_playbackpos(&conn, &active.url, playback_time)?;
     output.wait().unwrap();
     Ok(())
 }
@@ -188,10 +188,10 @@ fn main() -> Result<(), Error> {
     }
     match Options::from_args() {
         Options::Add(Add::Video(vid)) => {
-            make_active(&conn, &vid.link)?;
+            make_active(&conn, &vid.url)?;
         }
         Options::Play(p) => {
-            play(&conn, &p.link)?;
+            play(&conn, &p.url)?;
         }
         Options::Add(Add::Feed(add)) => {
             let feed = match add {
@@ -224,14 +224,14 @@ fn main() -> Result<(), Error> {
                 let (_, feed) = feed.unwrap();
 
                 println!("Feed {}", feed.title);
-                println!("{} \t| {} \t| {}", "Title", "Publication", "Link");
+                println!("{} \t| {} \t| {}", "Title", "Publication", "url");
                 let feed = fetch(&feed.url).unwrap();
                 for entry in feed.entries() {
                     println!(
                         "{} \t| {} \t| \"{}\"",
                         entry.title,
                         entry.publication.to_rfc3339(),
-                        entry.link,
+                        entry.url,
                     );
                 }
             }
@@ -258,22 +258,19 @@ fn main() -> Result<(), Error> {
                         "{} \t| {} \t| {}",
                         entry.title,
                         entry.publication.to_rfc3339(),
-                        entry.link,
+                        entry.url,
                     );
                 }
             }
             List::Active => {
                 println!("{} \t| {} \t| {}", "Title", "Url", "Playback");
                 for entry in iter_active(&conn)? {
-                    println!(
-                        "{} \t| {} \t {}",
-                        entry.title, entry.link, entry.playbackpos
-                    );
+                    println!("{} \t| {} \t {}", entry.title, entry.url, entry.playbackpos);
                 }
             }
         },
         Options::Remove(remove) => {
-            remove_from_available(&conn, &remove.link)?;
+            remove_from_available(&conn, &remove.url)?;
         }
         Options::Refresh => {
             refresh(&conn)?;

@@ -31,14 +31,14 @@ impl FeedEntries {
 fn entry_from_atom(entry: &atom_syndication::Entry) -> Option<Available> {
     Some(Available {
         title: entry.title().to_owned(),
-        link: entry.links().first()?.href().to_owned(),
+        url: entry.links().first()?.href().to_owned(),
         publication: parse_time(entry.published()?).unwrap(),
     })
 }
 fn entry_from_rss(entry: &rss::Item) -> Option<Available> {
     Some(Available {
         title: entry.title()?.to_owned(),
-        link: entry.link()?.to_owned(),
+        url: entry.link()?.to_owned(),
         publication: parse_time(entry.pub_date()?).unwrap(),
     })
 }

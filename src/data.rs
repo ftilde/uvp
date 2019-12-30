@@ -11,31 +11,31 @@ fn to_string(d: &DateTime) -> String {
 
 const TABLE_DEFINITION_ACTIVE: &'static str = r#"
 CREATE TABLE IF NOT EXISTS active (
-    link           TEXT PRIMARY KEY,
+    url           TEXT PRIMARY KEY,
     title          TEXT NOT NULL,
     playbackpos    FLOAT NOT NULL
 );
 "#;
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Active {
     pub title: String,
-    pub link: String,
+    pub url: String,
     pub playbackpos: f64,
 }
 
 const TABLE_DEFINITION_AVAILABLE: &'static str = r#"
 CREATE TABLE IF NOT EXISTS available (
     title          TEXT NOT NULL,
-    link           TEXT PRIMARY KEY,
+    url           TEXT PRIMARY KEY,
     publication    TEXT NOT NULL,
     feedid         INTEGER,
     FOREIGN KEY(feedid) REFERENCES feed
 );
 "#;
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Available {
     pub title: String,
-    pub link: String,
+    pub url: String,
     pub publication: DateTime,
 }
 
@@ -98,7 +98,8 @@ pub fn add_to_feed(conn: &Connection, feed: &Feed) -> Result<(), rusqlite::Error
 pub fn iter_available(conn: &Connection) -> Result<Vec<Available>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, link, publication FROM available
+        SELECT title, url, publication FROM available
+        ORDER BY publication DESC
         "#,
     )?;
     let res = stmt
@@ -106,7 +107,7 @@ pub fn iter_available(conn: &Connection) -> Result<Vec<Available>, rusqlite::Err
             let publication: String = row.get(2)?;
             Ok(Available {
                 title: row.get(0)?,
-                link: row.get(1)?,
+                url: row.get(1)?,
                 publication: parse(&publication).unwrap(),
             })
         })?
@@ -120,15 +121,15 @@ pub fn find_in_available(
 ) -> Result<Option<Available>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, link, publication FROM available
-        WHERE link = ?1
+        SELECT title, url, publication FROM available
+        WHERE url = ?1
         "#,
     )?;
     let res = stmt.query_map(params!(url), |row| {
         let publication: String = row.get(2)?;
         Ok(Available {
             title: row.get(0)?,
-            link: row.get(1)?,
+            url: row.get(1)?,
             publication: parse(&publication).unwrap(),
         })
     })?;
@@ -139,7 +140,7 @@ pub fn find_in_available(
 pub fn remove_from_available(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> {
     conn.execute(
         r#"
-        DELETE FROM available WHERE link = ?1
+        DELETE FROM available WHERE url = ?1
         "#,
         params!(url),
     )?;
@@ -148,16 +149,16 @@ pub fn remove_from_available(conn: &Connection, url: &str) -> Result<(), rusqlit
 
 pub fn add_to_available(
     conn: &Connection,
-    feedid: u32,
+    feedid: Option<u32>,
     available: &Available,
 ) -> Result<(), rusqlite::Error> {
     conn.execute(
         r#"
-        INSERT INTO available (title, link, feedid, publication) VALUES (?1, ?2, ?3, ?4)
+        INSERT INTO available (title, url, feedid, publication) VALUES (?1, ?2, ?3, ?4)
         "#,
         params!(
             available.title,
-            available.link,
+            available.url,
             feedid,
             to_string(&available.publication)
         ),
@@ -170,14 +171,14 @@ pub fn add_to_available(
 pub fn iter_active(conn: &Connection) -> Result<Vec<Active>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, link, playbackpos FROM active
+        SELECT title, url, playbackpos FROM active
         "#,
     )?;
     let res = stmt
         .query_map(params!(), |row| {
             Ok(Active {
                 title: row.get(0)?,
-                link: row.get(1)?,
+                url: row.get(1)?,
                 playbackpos: row.get(2)?,
             })
         })?
@@ -188,13 +189,13 @@ pub fn iter_active(conn: &Connection) -> Result<Vec<Active>, rusqlite::Error> {
 pub fn find_in_active(conn: &Connection, url: &str) -> Result<Option<Active>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, link, playbackpos FROM active WHERE link = ?1
+        SELECT title, url, playbackpos FROM active WHERE url = ?1
         "#,
     )?;
     let res = stmt.query_map(params!(url), |row| {
         Ok(Active {
             title: row.get(0)?,
-            link: row.get(1)?,
+            url: row.get(1)?,
             playbackpos: row.get(2)?,
         })
     })?;
@@ -202,22 +203,36 @@ pub fn find_in_active(conn: &Connection, url: &str) -> Result<Option<Active>, ru
     Ok(iter.next().transpose()?)
 }
 
-pub fn add_to_active(conn: &Connection, url: &str, title: &str) -> Result<(), rusqlite::Error> {
+pub fn add_to_active(conn: &Connection, active: &Active) -> Result<(), rusqlite::Error> {
     conn.execute(
         r#"
-        INSERT INTO active (link, title, playbackpos) VALUES (?1, ?2, 0)
+        INSERT INTO active (url, title, playbackpos) VALUES (?1, ?2, ?3)
         "#,
-        params!(url, title),
+        params!(active.url, active.title, active.playbackpos),
     )?;
     Ok(())
 }
 
 pub fn make_active(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> {
     if let Some(available) = find_in_available(&conn, url)? {
-        add_to_active(&conn, &url, &available.title)?;
+        add_to_active(
+            &conn,
+            &Active {
+                url: url.to_owned(),
+                title: available.title,
+                playbackpos: 0.0,
+            },
+        )?;
         remove_from_available(&conn, url)
     } else {
-        add_to_active(&conn, url, url)
+        add_to_active(
+            &conn,
+            &Active {
+                url: url.to_owned(),
+                title: url.to_owned(),
+                playbackpos: 0.0,
+            },
+        )
     }
 }
 pub fn set_playbackpos(
@@ -227,9 +242,18 @@ pub fn set_playbackpos(
 ) -> Result<(), rusqlite::Error> {
     conn.execute(
         r#"
-        UPDATE active SET playbackpos = ?1 WHERE link = ?2
+        UPDATE active SET playbackpos = ?1 WHERE url = ?2
         "#,
         params!(playbackpos, url),
+    )?;
+    Ok(())
+}
+pub fn remove_from_active(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        r#"
+        DELETE FROM active WHERE url = ?1
+        "#,
+        params!(url),
     )?;
     Ok(())
 }
