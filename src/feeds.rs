@@ -37,7 +37,6 @@ fn entry_from_atom(entry: &atom_syndication::Entry) -> Option<Available> {
     })
 }
 fn entry_from_rss(entry: &rss::Item) -> Option<Available> {
-    println!("Entry: {:?}", entry);
     Some(Available {
         title: entry.title()?.to_owned(),
         url: entry.link()?.to_owned(),
