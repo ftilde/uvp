@@ -396,9 +396,7 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
         if let Ok(msg) = work_receiver.try_recv() {
             match msg {
                 TuiMsg::Play(url) => {
-                    term.leave_tui().unwrap();
-                    crate::play(conn, &url)?;
-                    term.enter_tui().unwrap();
+                    term.on_main_screen(|| crate::play(conn, &url)).unwrap()?;
                     tui.update(conn)?;
                 }
                 TuiMsg::MakeActive(url) => {
