@@ -133,7 +133,7 @@ impl Container<<Tui as ContainerProvider>::Parameters> for ActiveTable {
         input
             .chain((Key::Char('\n'), || {
                 if let Some(row) = self.table.current_row_mut() {
-                    sender.send(Msg::Play(row.url.clone())).unwrap();
+                    sender.send(TuiMsg::Play(row.url.clone())).unwrap();
                 }
             }))
             .chain(
@@ -181,7 +181,7 @@ impl Container<<Tui as ContainerProvider>::Parameters> for AvailableTable {
         input
             .chain((Key::Char('\n'), || {
                 if let Some(row) = self.table.current_row_mut() {
-                    sender.send(Msg::MakeActive(row.url.clone())).unwrap();
+                    sender.send(TuiMsg::MakeActive(row.url.clone())).unwrap();
                 }
             }))
             .chain(
@@ -235,6 +235,8 @@ impl AvailableTable {
 enum Msg {
     Input(Input),
     Redraw,
+}
+enum TuiMsg {
     Play(String),
     MakeActive(String),
 }
@@ -251,7 +253,7 @@ impl Tui {
     }
 }
 impl ContainerProvider for Tui {
-    type Parameters = std::sync::mpsc::SyncSender<Msg>;
+    type Parameters = std::sync::mpsc::SyncSender<TuiMsg>;
     type Index = TuiComponents;
     fn get<'a, 'b: 'a>(&'b self, index: &'a Self::Index) -> &'b dyn Container<Self::Parameters> {
         match index {
@@ -290,20 +292,28 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
     ]);
     let mut manager = ContainerManager::<Tui>::from_layout(Box::new(layout));
 
-    let (mut tui_sender, tui_receiver) = std::sync::mpsc::sync_channel(1);
+    let (signals_sender, tui_receiver) = std::sync::mpsc::sync_channel(0);
 
-    let input_sender = tui_sender.clone();
+    let stdin_read_lock =
+        std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let input_sender = signals_sender.clone();
+    let stdin_read_lock_loop = stdin_read_lock.clone();
     let _input_handler = std::thread::spawn(move || {
         let stdin = std::io::stdin();
         let stdin = stdin.lock();
         for input in Input::read_all(stdin) {
             let input = input.unwrap();
             input_sender.send(Msg::Input(input)).unwrap();
+
+            let &(ref lock, ref cvar) = &*stdin_read_lock_loop;
+            let mut allowed_to_pass = lock.lock().unwrap();
+            while !*allowed_to_pass {
+                allowed_to_pass = cvar.wait(allowed_to_pass).unwrap();
+            }
         }
     });
 
     let signals = Signals::new(&[signal_hook::SIGWINCH]).unwrap();
-    let signals_sender = tui_sender.clone();
     let _signal_handler = std::thread::spawn(move || {
         for signal in signals.forever() {
             match signal {
@@ -316,6 +326,7 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
             }
         }
     });
+    let (mut work_sender, work_receiver) = std::sync::mpsc::sync_channel(1);
 
     let mut run = true;
     while run {
@@ -329,12 +340,19 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
             );
         }
         term.present();
+
+        // Do not let input loop start another iteration just yet.
+        // In case we want to play a video, mpv needs full access to the terminal, including stdin!
+        {
+            let mut pass = stdin_read_lock.0.lock().unwrap();
+            *pass = false;
+        }
         if let Ok(msg) = tui_receiver.recv() {
             match msg {
                 Msg::Input(input) => {
                     input
-                        .chain((Key::Char('e'), || run = false))
-                        .chain(manager.active_container_behavior(&mut tui, &mut tui_sender))
+                        .chain((Key::Char('q'), || run = false))
+                        .chain(manager.active_container_behavior(&mut tui, &mut work_sender))
                         .chain(
                             NavigateBehavior::new(&mut manager.navigatable(&mut tui))
                                 .left_on(Key::Char('h'))
@@ -344,17 +362,26 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
                         );
                 }
                 Msg::Redraw => {}
-                Msg::Play(url) => {
+            }
+        }
+        if let Ok(msg) = work_receiver.try_recv() {
+            match msg {
+                TuiMsg::Play(url) => {
                     term.leave_tui().unwrap();
                     crate::play(conn, &url)?;
                     term.enter_tui().unwrap();
                     tui.update(&conn)?;
                 }
-                Msg::MakeActive(url) => {
+                TuiMsg::MakeActive(url) => {
                     make_active(conn, &url)?;
                     tui.update(&conn)?;
                 }
             }
+        }
+        {
+            let mut pass = stdin_read_lock.0.lock().unwrap();
+            *pass = true;
+            stdin_read_lock.1.notify_one();
         }
     }
     Ok(())
