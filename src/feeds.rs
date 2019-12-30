@@ -33,13 +33,19 @@ fn entry_from_atom(entry: &atom_syndication::Entry) -> Option<Available> {
         title: entry.title().to_owned(),
         url: entry.links().first()?.href().to_owned(),
         publication: parse_time(entry.published()?).unwrap(),
+        duration_secs: None, //TODO
     })
 }
 fn entry_from_rss(entry: &rss::Item) -> Option<Available> {
+    println!("Entry: {:?}", entry);
     Some(Available {
         title: entry.title()?.to_owned(),
         url: entry.link()?.to_owned(),
         publication: parse_time(entry.pub_date()?).unwrap(),
+        duration_secs: entry
+            .itunes_ext()
+            .and_then(|ext| ext.duration())
+            .and_then(|s| str::parse::<f64>(s).ok()),
     })
 }
 
@@ -55,6 +61,5 @@ fn parse(xml: &str) -> Result<FeedEntries, Error> {
 pub fn fetch(url: &str) -> Result<FeedEntries, Error> {
     println!("Fetching from url: {}", url);
     let xml_resp = reqwest::get(url)?.text()?;
-    //println!("Response: {}", xml_resp);
     Ok(parse(&xml_resp)?)
 }

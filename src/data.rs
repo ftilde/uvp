@@ -26,9 +26,10 @@ pub struct Active {
 const TABLE_DEFINITION_AVAILABLE: &'static str = r#"
 CREATE TABLE IF NOT EXISTS available (
     title          TEXT NOT NULL,
-    url           TEXT PRIMARY KEY,
+    url            TEXT PRIMARY KEY,
     publication    TEXT NOT NULL,
     feedid         INTEGER,
+    duration       FLOAT,
     FOREIGN KEY(feedid) REFERENCES feed
 );
 "#;
@@ -37,6 +38,7 @@ pub struct Available {
     pub title: String,
     pub url: String,
     pub publication: DateTime,
+    pub duration_secs: Option<f64>,
 }
 
 const TABLE_DEFINITION_FEED: &'static str = r#"
@@ -98,7 +100,7 @@ pub fn add_to_feed(conn: &Connection, feed: &Feed) -> Result<(), rusqlite::Error
 pub fn iter_available(conn: &Connection) -> Result<Vec<Available>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, url, publication FROM available
+        SELECT title, url, publication, duration FROM available
         ORDER BY publication DESC
         "#,
     )?;
@@ -109,6 +111,7 @@ pub fn iter_available(conn: &Connection) -> Result<Vec<Available>, rusqlite::Err
                 title: row.get(0)?,
                 url: row.get(1)?,
                 publication: parse(&publication).unwrap(),
+                duration_secs: row.get(3)?,
             })
         })?
         .collect::<Result<Vec<_>, rusqlite::Error>>();
@@ -131,6 +134,7 @@ pub fn find_in_available(
             title: row.get(0)?,
             url: row.get(1)?,
             publication: parse(&publication).unwrap(),
+            duration_secs: row.get(3)?,
         })
     })?;
     let mut iter = res.into_iter();

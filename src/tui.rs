@@ -183,6 +183,7 @@ impl Container<<Tui as ContainerProvider>::Parameters> for ActiveTable {
 
 struct AvailableRow {
     title: HighlightLabel,
+    duration: HighlightLabel,
     publication: HighlightLabel,
     data: Available,
 }
@@ -192,6 +193,11 @@ impl TableRow for AvailableRow {
         Column {
             access: |r| &r.title,
             access_mut: |r| &mut r.title,
+            behavior: |_, i| Some(i),
+        },
+        Column {
+            access: |r| &r.duration,
+            access_mut: |r| &mut r.duration,
             behavior: |_, i| Some(i),
         },
         Column {
@@ -274,6 +280,11 @@ impl AvailableTable {
         for available in available {
             rows.push(AvailableRow {
                 title: HighlightLabel::new(available.title.clone()),
+                duration: HighlightLabel::new(if let Some(t) = available.duration_secs {
+                    format_time(Duration::milliseconds((t * 1_000.0) as i64))
+                } else {
+                    "".to_owned()
+                }),
                 publication: HighlightLabel::new(available.publication.to_rfc3339()),
                 data: available,
             });
@@ -458,5 +469,4 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     //TODO
     //fix tui layout
-    //add video length
 }
