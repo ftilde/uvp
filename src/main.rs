@@ -130,7 +130,12 @@ fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
                 let fetched_feed = fetch(&feed.url).await.unwrap();
                 (fetched_feed, feed)
             }));
-    let mut rt = tokio::runtime::Builder::new().basic_scheduler().enable_io().build().unwrap();
+    let mut rt = tokio::runtime::Builder::new()
+        .basic_scheduler()
+        .enable_io()
+        .enable_time()
+        .build()
+        .unwrap();
     let fetched_feeds = rt.block_on(fetches);
     for (fetched_feed, feed) in fetched_feeds {
         let mut lastpublication = feed.lastupdate;
