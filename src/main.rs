@@ -180,8 +180,6 @@ fn main() -> Result<(), Error> {
     let db_path = settings.get_str(DB_FILE_CONFIG_KEY).unwrap();
     let mpv_binary = settings.get_str(MPV_BINARY_CONFIG_KEY).unwrap();
 
-    println!("mpv_binary: {}", mpv_binary);
-
 
     //let flags = OpenFlags::SQLITE_OPEN_FULL_MUTEX;
     //let conn = Connection::open_with_flags(db_path, flags).unwrap();
