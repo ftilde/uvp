@@ -115,13 +115,13 @@ pub enum Error {
 
 fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
     for feed in iter_feeds(&conn)? {
-        let (fid, feed) = feed.unwrap();
+        let feed = feed.unwrap();
 
         let mut lastpublication = feed.lastupdate;
 
         for entry in fetch(&feed.url).unwrap().entries() {
             if feed.lastupdate.is_none() || feed.lastupdate.unwrap() < entry.publication {
-                ignore_constraint_errors(add_to_available(&conn, Some(fid), &entry))?;
+                ignore_constraint_errors(add_to_available(&conn, Some(feed.url.clone()), &entry))?;
             }
             lastpublication = if let Some(lastpublication) = lastpublication {
                 Some(entry.publication.max(lastpublication))
@@ -132,9 +132,9 @@ fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
         if let Some(lastpublication) = lastpublication {
             conn.execute(
                 r#"
-                UPDATE feed SET lastupdate = ?1 WHERE feedid = ?2
+                UPDATE feed SET lastupdate = ?1 WHERE feedurl = ?2
                 "#,
-                params!(lastpublication.to_rfc3339(), fid),
+                params!(lastpublication.to_rfc3339(), feed.url),
             )?;
         }
     }
@@ -221,7 +221,7 @@ fn main() -> Result<(), Error> {
         }
         Options::Fetch => {
             for feed in iter_feeds(&conn)? {
-                let (_, feed) = feed.unwrap();
+                let feed = feed.unwrap();
 
                 println!("Feed {}", feed.title);
                 println!("{} \t| {} \t| {}", "Title", "Publication", "url");
@@ -240,7 +240,7 @@ fn main() -> Result<(), Error> {
             List::Feeds => {
                 println!("{} \t| {} \t| {}", "Title", "Last Update", "Url");
                 for feed in iter_feeds(&conn)? {
-                    let (_, feed) = feed.unwrap();
+                    let feed = feed.unwrap();
                     println!(
                         "{} \t| {} \t| {}",
                         feed.title,

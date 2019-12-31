@@ -28,9 +28,9 @@ CREATE TABLE IF NOT EXISTS available (
     title          TEXT NOT NULL,
     url            TEXT PRIMARY KEY,
     publication    TEXT NOT NULL,
-    feedid         INTEGER,
+    feedurl        TEXT,
     duration       FLOAT,
-    FOREIGN KEY(feedid) REFERENCES feed
+    FOREIGN KEY(feedurl) REFERENCES feed
 );
 "#;
 #[derive(Debug, Clone)]
@@ -43,9 +43,8 @@ pub struct Available {
 
 const TABLE_DEFINITION_FEED: &'static str = r#"
 CREATE TABLE IF NOT EXISTS feed (
-    feedid          INTEGER PRIMARY KEY AUTOINCREMENT,
+    feedurl         TEXT PRIMARY KEY,
     title           TEXT NOT NULL,
-    url             TEXT NOT NULL,
     lastupdate      Text
 );
 "#;
@@ -64,24 +63,21 @@ pub const TABLE_DEFINITIONS: &[&str] = &[
 /// Feed -----------------------------------------------------------------------
 pub fn iter_feeds(
     conn: &Connection,
-) -> Result<Vec<Result<(u32, Feed), rusqlite::Error>>, rusqlite::Error> {
+) -> Result<Vec<Result<Feed, rusqlite::Error>>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT feedid, title, url, lastupdate FROM feed
+        SELECT feedurl, title, lastupdate FROM feed
         "#,
     )?;
     let res = stmt
         .query_map(params!(), |row| {
-            Ok((
-                row.get(0)?,
-                Feed {
-                    title: row.get(1)?,
-                    url: row.get(2)?,
-                    lastupdate: row.get(3).map(|lastupdate: Option<String>| {
-                        lastupdate.map(|lastupdate| parse(&lastupdate).unwrap())
-                    })?,
-                },
-            ))
+            Ok(Feed {
+                url: row.get(0)?,
+                title: row.get(1)?,
+                lastupdate: row.get(2).map(|lastupdate: Option<String>| {
+                    lastupdate.map(|lastupdate| parse(&lastupdate).unwrap())
+                })?,
+            })
         })?
         .collect();
     Ok(res)
@@ -89,7 +85,7 @@ pub fn iter_feeds(
 pub fn add_to_feed(conn: &Connection, feed: &Feed) -> Result<(), rusqlite::Error> {
     conn.execute(
         r#"
-        INSERT INTO feed (title, url) VALUES (?1, ?2)
+        INSERT INTO feed (title, feedurl) VALUES (?1, ?2)
         "#,
         params!(feed.title, feed.url),
     )?;
@@ -124,7 +120,7 @@ pub fn find_in_available(
 ) -> Result<Option<Available>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, url, publication FROM available
+        SELECT title, url, publication, duration FROM available
         WHERE url = ?1
         "#,
     )?;
@@ -153,17 +149,17 @@ pub fn remove_from_available(conn: &Connection, url: &str) -> Result<(), rusqlit
 
 pub fn add_to_available(
     conn: &Connection,
-    feedid: Option<u32>,
+    feed: Option<String>,
     available: &Available,
 ) -> Result<(), rusqlite::Error> {
     conn.execute(
         r#"
-        INSERT INTO available (title, url, feedid, publication) VALUES (?1, ?2, ?3, ?4)
+        INSERT INTO available (title, url, feedurl, publication) VALUES (?1, ?2, ?3, ?4)
         "#,
         params!(
             available.title,
             available.url,
-            feedid,
+            feed,
             to_string(&available.publication)
         ),
     )?;
