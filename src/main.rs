@@ -74,7 +74,6 @@ enum List {
 enum Options {
     #[structopt(about = "Add a feed")]
     Add(Add),
-    Fetch,
     #[structopt(about = "Refresh the list of available videos")]
     Refresh,
     #[structopt(about = "List parts of database")]
@@ -123,12 +122,17 @@ pub enum Error {
 }
 
 fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
-    for feed in iter_feeds(&conn)? {
-        let feed = feed.unwrap();
-
+    let fetches = futures::future::join_all(iter_feeds(&conn)?.into_iter().map(|feed|
+            async {
+                let fetched_feed = fetch(&feed.url).await.unwrap();
+                (fetched_feed, feed)
+            }));
+    let mut rt = tokio::runtime::Builder::new().basic_scheduler().enable_io().build().unwrap();
+    let fetched_feeds = rt.block_on(fetches);
+    for (fetched_feed, feed) in fetched_feeds {
         let mut lastpublication = feed.lastupdate;
 
-        for entry in fetch(&feed.url).unwrap().entries() {
+        for entry in fetched_feed.entries() {
             if feed.lastupdate.is_none() || feed.lastupdate.unwrap() < entry.publication {
                 ignore_constraint_errors(add_to_available(&conn, Some(feed.url.clone()), &entry))?;
             }
@@ -200,28 +204,10 @@ fn main() -> Result<(), Error> {
             };
             add_to_feed(&conn, &feed)?;
         }
-        Options::Fetch => {
-            for feed in iter_feeds(&conn)? {
-                let feed = feed.unwrap();
-
-                println!("Feed {}", feed.title);
-                println!("{} \t| {} \t| {}", "Title", "Publication", "url");
-                let feed = fetch(&feed.url).unwrap();
-                for entry in feed.entries() {
-                    println!(
-                        "{} \t| {} \t| \"{}\"",
-                        entry.title,
-                        entry.publication.to_rfc3339(),
-                        entry.url,
-                    );
-                }
-            }
-        }
         Options::List(what) => match what {
             List::Feeds => {
                 println!("{} \t| {} \t| {}", "Title", "Last Update", "Url");
                 for feed in iter_feeds(&conn)? {
-                    let feed = feed.unwrap();
                     println!(
                         "{} \t| {} \t| {}",
                         feed.title,

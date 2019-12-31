@@ -63,9 +63,7 @@ pub const TABLE_DEFINITIONS: &[&str] = &[
 ];
 
 /// Feed -----------------------------------------------------------------------
-pub fn iter_feeds(
-    conn: &Connection,
-) -> Result<Vec<Result<Feed, rusqlite::Error>>, rusqlite::Error> {
+pub fn iter_feeds(conn: &Connection) -> Result<Vec<Feed>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
         SELECT feedurl, title, lastupdate FROM feed
@@ -81,8 +79,8 @@ pub fn iter_feeds(
                 })?,
             })
         })?
-        .collect();
-    Ok(res)
+        .collect::<Result<Vec<_>, rusqlite::Error>>();
+    res
 }
 pub fn add_to_feed(conn: &Connection, feed: &Feed) -> Result<(), rusqlite::Error> {
     conn.execute(

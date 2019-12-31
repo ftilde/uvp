@@ -57,8 +57,8 @@ fn parse(xml: &str) -> Result<FeedEntries, Error> {
     )))
 }
 
-pub fn fetch(url: &str) -> Result<FeedEntries, Error> {
-    println!("Fetching from url: {}", url);
-    let xml_resp = reqwest::get(url)?.text()?;
+pub async fn fetch(url: &str) -> Result<FeedEntries, Error> {
+    let xml_resp = reqwest::get(url).await?.text().await?;
+    println!("Fetched from url: {}", url);
     Ok(parse(&xml_resp)?)
 }
