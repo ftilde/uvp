@@ -3,7 +3,7 @@ use derive_more::*;
 use reqwest;
 use rss;
 use rusqlite::{params, Connection};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 
 mod data;
@@ -112,6 +112,9 @@ fn ignore_constraint_errors(res: Result<(), rusqlite::Error>) -> Result<(), rusq
 }
 
 const DB_NAME: &'static str = "umc.db";
+const CONFIG_FILE_NAME: &'static str = "umc.toml";
+const DB_FILE_CONFIG_KEY: &'static str = "database_file";
+const MPV_BINARY_CONFIG_KEY: &'static str = "mpv_binary";
 
 #[derive(From, Debug)]
 pub enum Error {
@@ -154,13 +157,35 @@ fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 fn main() -> Result<(), Error> {
-    let db_path = dirs::data_dir()
+    let mut settings = config::Config::default();
+    let default_db_path = dirs::data_dir()
         .unwrap_or(Path::new("./").to_owned())
         .join(DB_NAME);
 
+    settings.set_default(DB_FILE_CONFIG_KEY, default_db_path.to_string_lossy().as_ref()).unwrap();
+    settings.set_default(MPV_BINARY_CONFIG_KEY, "mpv").unwrap();
+
+    for config_location in vec![Some(PathBuf::from("/etc")), dirs::config_dir(), Some(PathBuf::from("./"))] {
+        if let Some(config_location) = config_location {
+            let config_file = config_location.join(CONFIG_FILE_NAME);
+            if config_file.is_file() {
+                let config_file_name = config_file.to_string_lossy();
+                if let Err(e) = settings.merge(config::File::with_name(&config_file_name)) {
+                    panic!("Failed to load config file {}: {:?}", config_file_name, e);
+                }
+            }
+        }
+    }
+
+    let db_path = settings.get_str(DB_FILE_CONFIG_KEY).unwrap();
+    let mpv_binary = settings.get_str(MPV_BINARY_CONFIG_KEY).unwrap();
+
+    println!("mpv_binary: {}", mpv_binary);
+
+
     //let flags = OpenFlags::SQLITE_OPEN_FULL_MUTEX;
     //let conn = Connection::open_with_flags(db_path, flags).unwrap();
-    let conn = Connection::open(db_path).unwrap();
+    let conn = Connection::open(Path::new(&db_path))?;
     for def in TABLE_DEFINITIONS {
         conn.execute(def, params![])?;
     }
@@ -169,7 +194,7 @@ fn main() -> Result<(), Error> {
             make_active(&conn, &vid.url)?;
         }
         Options::Play(p) => {
-            mpv::play(&conn, &p.url)?;
+            mpv::play(&conn, &p.url, &mpv_binary)?;
         }
         Options::Add(Add::Feed(add)) => {
             let feed = match add {
@@ -248,7 +273,7 @@ fn main() -> Result<(), Error> {
         }
         Options::Tui => {
             refresh(&conn)?;
-            tui::run(&conn)?;
+            tui::run(&conn, &mpv_binary)?;
         }
     }
     Ok(())

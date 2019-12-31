@@ -351,7 +351,7 @@ enum TuiComponents {
     Active,
 }
 
-pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
+pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
     let stdout = std::io::stdout();
     let mut term = unsegen::base::Terminal::new(stdout.lock()).unwrap();
     let mut tui = Tui {
@@ -443,7 +443,7 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
         if let Ok(msg) = work_receiver.try_recv() {
             match msg {
                 TuiMsg::Play(url) => {
-                    term.on_main_screen(|| crate::mpv::play(conn, &url))
+                    term.on_main_screen(|| crate::mpv::play(conn, &url, mpv_binary))
                         .unwrap()?;
                     tui.update(conn)?;
                 }

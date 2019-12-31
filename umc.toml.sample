@@ -1,0 +1,2 @@
+#database_file = "/path/to/db/file.db"
+#mpv_binary = "/path/to/alternate/mpv"

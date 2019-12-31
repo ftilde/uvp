@@ -3,7 +3,7 @@ use rusqlite::Connection;
 
 const END_DETECTION_TOLERANCE_SECONDS: f64 = 1.0;
 
-pub fn play(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> {
+pub fn play(conn: &Connection, url: &str, mpv_binary: &str) -> Result<(), rusqlite::Error> {
     crate::ignore_constraint_errors(make_active(conn, url))?;
     let active = find_in_active(conn, url)?.unwrap();
 
@@ -11,7 +11,7 @@ pub fn play(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> {
 
     let pipe_path = tmp_dir.path().join("mpv.pipe");
 
-    let mut output = std::process::Command::new("mpv")
+    let mut output = std::process::Command::new(mpv_binary)
         .arg(&active.url)
         .arg("--input-ipc-server")
         .arg(&pipe_path)
