@@ -30,6 +30,8 @@ struct AddVideo {
 #[derive(StructOpt)]
 enum AddFeed {
     Youtube {
+        #[structopt(long = "id", help = "Fetch using the channel id")]
+        channel_id: Option<String>,
         channel_name: String,
     },
     Mediathek {
@@ -84,8 +86,14 @@ enum Options {
     Tui,
 }
 
-fn youtube_url(channel: &str) -> String {
+fn youtube_url_user(channel: &str) -> String {
     format!("https://www.youtube.com/feeds/videos.xml?user={}", channel)
+}
+fn youtube_url_channelid(channel: &str) -> String {
+    format!(
+        "https://www.youtube.com/feeds/videos.xml?channel_id={}",
+        channel
+    )
 }
 
 fn mediathek_url(channel: &str) -> String {
@@ -195,8 +203,15 @@ fn main() -> Result<(), Error> {
         }
         Options::Add(Add::Feed(add)) => {
             let feed = match add {
-                AddFeed::Youtube { channel_name } => {
-                    let url = youtube_url(&channel_name);
+                AddFeed::Youtube {
+                    channel_name,
+                    channel_id,
+                } => {
+                    let url = if let Some(channel_id) = channel_id {
+                        youtube_url_channelid(&channel_id)
+                    } else {
+                        youtube_url_user(&channel_name)
+                    };
                     Feed {
                         title: channel_name,
                         url,
