@@ -11,9 +11,10 @@ fn to_string(d: &DateTime) -> String {
 
 const TABLE_DEFINITION_ACTIVE: &'static str = r#"
 CREATE TABLE IF NOT EXISTS active (
-    url           TEXT PRIMARY KEY,
+    url            TEXT PRIMARY KEY,
     title          TEXT NOT NULL,
-    playbackpos    FLOAT NOT NULL
+    playbackpos    FLOAT NOT NULL,
+    duration_secs  FLOAT
 );
 "#;
 #[derive(Debug, Clone)]
@@ -21,6 +22,7 @@ pub struct Active {
     pub title: String,
     pub url: String,
     pub playbackpos: f64,
+    pub duration_secs: Option<f64>,
 }
 
 const TABLE_DEFINITION_AVAILABLE: &'static str = r#"
@@ -171,7 +173,7 @@ pub fn add_to_available(
 pub fn iter_active(conn: &Connection) -> Result<Vec<Active>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, url, playbackpos FROM active
+        SELECT title, url, playbackpos, duration_secs FROM active
         "#,
     )?;
     let res = stmt
@@ -180,6 +182,7 @@ pub fn iter_active(conn: &Connection) -> Result<Vec<Active>, rusqlite::Error> {
                 title: row.get(0)?,
                 url: row.get(1)?,
                 playbackpos: row.get(2)?,
+                duration_secs: row.get(3)?,
             })
         })?
         .collect::<Result<Vec<_>, rusqlite::Error>>();
@@ -189,7 +192,7 @@ pub fn iter_active(conn: &Connection) -> Result<Vec<Active>, rusqlite::Error> {
 pub fn find_in_active(conn: &Connection, url: &str) -> Result<Option<Active>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, url, playbackpos FROM active WHERE url = ?1
+        SELECT title, url, playbackpos, duration_secs FROM active WHERE url = ?1
         "#,
     )?;
     let res = stmt.query_map(params!(url), |row| {
@@ -197,6 +200,7 @@ pub fn find_in_active(conn: &Connection, url: &str) -> Result<Option<Active>, ru
             title: row.get(0)?,
             url: row.get(1)?,
             playbackpos: row.get(2)?,
+            duration_secs: row.get(3)?,
         })
     })?;
     let mut iter = res.into_iter();
@@ -221,6 +225,7 @@ pub fn make_active(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> 
                 url: url.to_owned(),
                 title: available.title,
                 playbackpos: 0.0,
+                duration_secs: available.duration_secs,
             },
         )?;
         remove_from_available(&conn, url)
@@ -231,6 +236,7 @@ pub fn make_active(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> 
                 url: url.to_owned(),
                 title: url.to_owned(),
                 playbackpos: 0.0,
+                duration_secs: None,
             },
         )
     }
@@ -245,6 +251,19 @@ pub fn set_playbackpos(
         UPDATE active SET playbackpos = ?1 WHERE url = ?2
         "#,
         params!(playbackpos, url),
+    )?;
+    Ok(())
+}
+pub fn set_duration(
+    conn: &Connection,
+    url: &str,
+    duration_secs: f64,
+) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        r#"
+        UPDATE active SET duration_secs = ?1 WHERE url = ?2
+        "#,
+        params!(duration_secs, url),
     )?;
     Ok(())
 }
