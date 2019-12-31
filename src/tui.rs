@@ -1,5 +1,5 @@
 use crate::data::{
-    add_to_active, add_to_available, iter_active, iter_available, make_active, remove_from_active,
+    add_to_active, add_to_available, iter_active, iter_available, remove_from_active,
     remove_from_available,
 };
 use rusqlite::Connection;
@@ -234,9 +234,7 @@ impl Container<<Tui as ContainerProvider>::Parameters> for AvailableTable {
         input
             .chain((Key::Char('\n'), || {
                 if let Some(row) = self.table.current_row() {
-                    sender
-                        .send(TuiMsg::MakeActive(row.data.url.clone()))
-                        .unwrap();
+                    sender.send(TuiMsg::Play(row.data.url.clone())).unwrap();
                 }
             }))
             .chain((Key::Char('d'), || {
@@ -310,7 +308,6 @@ enum Msg {
 }
 enum TuiMsg {
     Play(String),
-    MakeActive(String),
     Delete(String),
     AddActive(Active),
     AddAvailable(Available),
@@ -448,10 +445,6 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
                 TuiMsg::Play(url) => {
                     term.on_main_screen(|| crate::mpv::play(conn, &url))
                         .unwrap()?;
-                    tui.update(conn)?;
-                }
-                TuiMsg::MakeActive(url) => {
-                    make_active(conn, &url)?;
                     tui.update(conn)?;
                 }
                 TuiMsg::Refresh => {
