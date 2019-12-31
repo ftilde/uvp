@@ -272,7 +272,6 @@ fn main() -> Result<(), Error> {
             refresh(&conn)?;
         }
         Options::Tui => {
-            refresh(&conn)?;
             tui::run(&conn, &mpv_binary)?;
         }
     }

@@ -2,6 +2,7 @@ use crate::data::{
     add_to_active, add_to_available, iter_active, iter_available, remove_from_active,
     remove_from_available,
 };
+use crate::refresh;
 use rusqlite::Connection;
 use signal_hook::iterator::Signals;
 use unsegen::base::{Color, GraphemeCluster, StyleModifier, Window};
@@ -352,6 +353,8 @@ enum TuiComponents {
 }
 
 pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
+    refresh(&conn)?;
+
     let stdout = std::io::stdout();
     let mut term = unsegen::base::Terminal::new(stdout.lock()).unwrap();
     let mut tui = Tui {
@@ -448,6 +451,7 @@ pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
                     tui.update(conn)?;
                 }
                 TuiMsg::Refresh => {
+                    refresh(conn)?;
                     tui.update(conn)?;
                 }
                 TuiMsg::Delete(url) => {
