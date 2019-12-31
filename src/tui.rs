@@ -16,7 +16,10 @@ use chrono::Duration;
 
 use crate::data::{Active, Available};
 
-fn format_time(mut duration: Duration) -> String {
+fn format_duration_secs(duration: f64) -> String {
+    format_duration(Duration::milliseconds((duration * 1_000.0) as i64))
+}
+fn format_duration(mut duration: Duration) -> String {
     let prefix = if duration < Duration::zero() {
         duration = -duration;
         "-"
@@ -127,9 +130,18 @@ impl ActiveTable {
         for active in active {
             rows.push(ActiveRow {
                 title: HighlightLabel::new(active.title.clone()),
-                time: HighlightLabel::new(format_time(Duration::milliseconds(
-                    (active.playbackpos * 1_000.0) as i64,
-                ))),
+                time: {
+                    let label = if let Some(duration_secs) = active.duration_secs {
+                        let progress_str = format_duration_secs(active.playbackpos);
+                        let duration_str = format_duration_secs(duration_secs);
+                        let percentage = (active.playbackpos / duration_secs * 100.0) as u32;
+                        format!("{}/{} ({}%)", progress_str, duration_str, percentage)
+                    } else {
+                        format_duration_secs(active.playbackpos)
+                    };
+
+                    HighlightLabel::new(label)
+                },
                 padding: Padding,
                 data: active,
             });
@@ -281,7 +293,7 @@ impl AvailableTable {
             rows.push(AvailableRow {
                 title: HighlightLabel::new(available.title.clone()),
                 duration: HighlightLabel::new(if let Some(t) = available.duration_secs {
-                    format_time(Duration::milliseconds((t * 1_000.0) as i64))
+                    format_duration_secs(t)
                 } else {
                     "".to_owned()
                 }),
