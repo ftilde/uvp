@@ -13,16 +13,18 @@ const TABLE_DEFINITION_ACTIVE: &'static str = r#"
 CREATE TABLE IF NOT EXISTS active (
     url            TEXT PRIMARY KEY,
     title          TEXT,
-    playbackpos    FLOAT NOT NULL,
-    duration_secs  FLOAT
+    position_secs  FLOAT NOT NULL,
+    duration_secs  FLOAT,
+    feed_title     TEXT
 );
 "#;
 #[derive(Debug, Clone)]
 pub struct Active {
     pub title: Option<String>,
     pub url: String,
-    pub playbackpos: f64,
+    pub position_secs: f64,
     pub duration_secs: Option<f64>,
+    pub feed_title: Option<String>,
 }
 
 const TABLE_DEFINITION_AVAILABLE: &'static str = r#"
@@ -30,8 +32,8 @@ CREATE TABLE IF NOT EXISTS available (
     title          TEXT NOT NULL,
     url            TEXT PRIMARY KEY,
     publication    TEXT NOT NULL,
-    feedurl        TEXT,
-    duration       FLOAT,
+    feedurl        TEXT NOT NULL,
+    duration_secs  FLOAT,
     FOREIGN KEY(feedurl) REFERENCES feed
 );
 "#;
@@ -41,6 +43,7 @@ pub struct Available {
     pub url: String,
     pub publication: DateTime,
     pub duration_secs: Option<f64>,
+    pub feed: Feed,
 }
 
 const TABLE_DEFINITION_FEED: &'static str = r#"
@@ -50,6 +53,8 @@ CREATE TABLE IF NOT EXISTS feed (
     lastupdate      Text
 );
 "#;
+
+#[derive(Debug, Clone)]
 pub struct Feed {
     pub title: String,
     pub url: String,
@@ -96,7 +101,8 @@ pub fn add_to_feed(conn: &Connection, feed: &Feed) -> Result<(), rusqlite::Error
 pub fn iter_available(conn: &Connection) -> Result<Vec<Available>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, url, publication, duration FROM available
+        SELECT available.title, url, publication, duration_secs, feedurl, feed.title, lastupdate
+        FROM available INNER JOIN feed USING(feedurl)
         ORDER BY publication DESC
         "#,
     )?;
@@ -108,6 +114,13 @@ pub fn iter_available(conn: &Connection) -> Result<Vec<Available>, rusqlite::Err
                 url: row.get(1)?,
                 publication: parse(&publication).unwrap(),
                 duration_secs: row.get(3)?,
+                feed: Feed {
+                    url: row.get(4)?,
+                    title: row.get(5)?,
+                    lastupdate: row.get(6).map(|lastupdate: Option<String>| {
+                        lastupdate.map(|lastupdate| parse(&lastupdate).unwrap())
+                    })?,
+                },
             })
         })?
         .collect::<Result<Vec<_>, rusqlite::Error>>();
@@ -120,7 +133,8 @@ pub fn find_in_available(
 ) -> Result<Option<Available>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, url, publication, duration FROM available
+        SELECT available.title, url, publication, duration_secs, feedurl, feed.title, lastupdate
+        FROM available INNER JOIN feed USING(feedurl)
         WHERE url = ?1
         "#,
     )?;
@@ -131,6 +145,13 @@ pub fn find_in_available(
             url: row.get(1)?,
             publication: parse(&publication).unwrap(),
             duration_secs: row.get(3)?,
+            feed: Feed {
+                url: row.get(4)?,
+                title: row.get(5)?,
+                lastupdate: row.get(6).map(|lastupdate: Option<String>| {
+                    lastupdate.map(|lastupdate| parse(&lastupdate).unwrap())
+                })?,
+            },
         })
     })?;
     let mut iter = res.into_iter();
@@ -147,10 +168,10 @@ pub fn remove_from_available(conn: &Connection, url: &str) -> Result<(), rusqlit
     Ok(())
 }
 
-pub fn add_to_available(
+pub fn add_entry_to_available(
     conn: &Connection,
-    feed: Option<String>,
-    available: &Available,
+    feed: String,
+    available: &crate::feeds::Entry,
 ) -> Result<(), rusqlite::Error> {
     conn.execute(
         r#"
@@ -166,12 +187,28 @@ pub fn add_to_available(
     Ok(())
 }
 
+pub fn add_to_available(conn: &Connection, available: &Available) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        r#"
+        INSERT INTO available (title, url, feedurl, publication) VALUES (?1, ?2, ?3, ?4)
+        "#,
+        params!(
+            available.title,
+            available.url,
+            available.feed.url,
+            to_string(&available.publication)
+        ),
+    )?;
+    Ok(())
+}
+
 /// Active ---------------------------------------------------------------------
 
 pub fn iter_active(conn: &Connection) -> Result<Vec<Active>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, url, playbackpos, duration_secs FROM active
+        SELECT title, url, position_secs, duration_secs, feed_title
+        FROM active
         "#,
     )?;
     let res = stmt
@@ -179,8 +216,9 @@ pub fn iter_active(conn: &Connection) -> Result<Vec<Active>, rusqlite::Error> {
             Ok(Active {
                 title: row.get(0)?,
                 url: row.get(1)?,
-                playbackpos: row.get(2)?,
+                position_secs: row.get(2)?,
                 duration_secs: row.get(3)?,
+                feed_title: row.get(4)?,
             })
         })?
         .collect::<Result<Vec<_>, rusqlite::Error>>();
@@ -190,15 +228,18 @@ pub fn iter_active(conn: &Connection) -> Result<Vec<Active>, rusqlite::Error> {
 pub fn find_in_active(conn: &Connection, url: &str) -> Result<Option<Active>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT title, url, playbackpos, duration_secs FROM active WHERE url = ?1
+        SELECT title, url, position_secs, duration_secs, feed_title
+        FROM active
+        where url = ?1
         "#,
     )?;
     let res = stmt.query_map(params!(url), |row| {
         Ok(Active {
             title: row.get(0)?,
             url: row.get(1)?,
-            playbackpos: row.get(2)?,
+            position_secs: row.get(2)?,
             duration_secs: row.get(3)?,
+            feed_title: row.get(4)?,
         })
     })?;
     let mut iter = res.into_iter();
@@ -208,9 +249,14 @@ pub fn find_in_active(conn: &Connection, url: &str) -> Result<Option<Active>, ru
 pub fn add_to_active(conn: &Connection, active: &Active) -> Result<(), rusqlite::Error> {
     conn.execute(
         r#"
-        INSERT INTO active (url, title, playbackpos) VALUES (?1, ?2, ?3)
+        INSERT INTO active (url, title, position_secs, feed_title) VALUES (?1, ?2, ?3, ?4)
         "#,
-        params!(active.url, active.title, active.playbackpos),
+        params!(
+            active.url,
+            active.title,
+            active.position_secs,
+            active.feed_title
+        ),
     )?;
     Ok(())
 }
@@ -222,8 +268,9 @@ pub fn make_active(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> 
             &Active {
                 url: url.to_owned(),
                 title: Some(available.title),
-                playbackpos: 0.0,
+                position_secs: 0.0,
                 duration_secs: available.duration_secs,
+                feed_title: Some(available.feed.title),
             },
         )?;
         remove_from_available(&conn, url)
@@ -233,22 +280,23 @@ pub fn make_active(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> 
             &Active {
                 url: url.to_owned(),
                 title: None,
-                playbackpos: 0.0,
+                position_secs: 0.0,
                 duration_secs: None,
+                feed_title: None,
             },
         )
     }
 }
-pub fn set_playbackpos(
+pub fn set_position_secs(
     conn: &Connection,
     url: &str,
-    playbackpos: f64,
+    position_secs: f64,
 ) -> Result<(), rusqlite::Error> {
     conn.execute(
         r#"
-        UPDATE active SET playbackpos = ?1 WHERE url = ?2
+        UPDATE active SET position_secs = ?1 WHERE url = ?2
         "#,
-        params!(playbackpos, url),
+        params!(position_secs, url),
     )?;
     Ok(())
 }

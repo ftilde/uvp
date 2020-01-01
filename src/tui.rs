@@ -78,6 +78,7 @@ impl Widget for HighlightLabel {
 }
 
 struct ActiveRow {
+    source: HighlightLabel,
     title: HighlightLabel,
     time: HighlightLabel,
     padding: Padding,
@@ -86,6 +87,11 @@ struct ActiveRow {
 
 impl TableRow for ActiveRow {
     const COLUMNS: &'static [Column<ActiveRow>] = &[
+        Column {
+            access: |r| &r.source,
+            access_mut: |r| &mut r.source,
+            behavior: |_, i| Some(i),
+        },
         Column {
             access: |r| &r.title,
             access_mut: |r| &mut r.title,
@@ -130,15 +136,22 @@ impl ActiveTable {
         rows.clear();
         for active in active {
             rows.push(ActiveRow {
+                source: HighlightLabel::new(
+                    active
+                        .feed_title
+                        .as_deref()
+                        .unwrap_or("External")
+                        .to_owned(),
+                ),
                 title: HighlightLabel::new(active.title.as_deref().unwrap_or("Unknown").to_owned()),
                 time: {
                     let label = if let Some(duration_secs) = active.duration_secs {
-                        let progress_str = format_duration_secs(active.playbackpos);
+                        let progress_str = format_duration_secs(active.position_secs);
                         let duration_str = format_duration_secs(duration_secs);
-                        let percentage = (active.playbackpos / duration_secs * 100.0) as u32;
+                        let percentage = (active.position_secs / duration_secs * 100.0) as u32;
                         format!("{}/{} ({}%)", progress_str, duration_str, percentage)
                     } else {
-                        format_duration_secs(active.playbackpos)
+                        format_duration_secs(active.position_secs)
                     };
 
                     HighlightLabel::new(label)
@@ -195,6 +208,7 @@ impl Container<<Tui as ContainerProvider>::Parameters> for ActiveTable {
 }
 
 struct AvailableRow {
+    source: HighlightLabel,
     title: HighlightLabel,
     duration: HighlightLabel,
     publication: HighlightLabel,
@@ -203,6 +217,11 @@ struct AvailableRow {
 
 impl TableRow for AvailableRow {
     const COLUMNS: &'static [Column<AvailableRow>] = &[
+        Column {
+            access: |r| &r.source,
+            access_mut: |r| &mut r.source,
+            behavior: |_, i| Some(i),
+        },
         Column {
             access: |r| &r.title,
             access_mut: |r| &mut r.title,
@@ -224,6 +243,40 @@ impl TableRow for AvailableRow {
 struct AvailableTable {
     table: Table<AvailableRow>,
     deleted: Vec<Available>,
+}
+
+impl AvailableTable {
+    fn with_available(available: impl Iterator<Item = Available>) -> Self {
+        let mut tui = AvailableTable {
+            table: Table::new(
+                SeparatingStyle::AlternatingStyle(
+                    StyleModifier::new().bg_color(Color::ansi_rgb(0, 0, 0)),
+                ),
+                SeparatingStyle::Draw(GraphemeCluster::try_from('|').unwrap()),
+                StyleModifier::new(),
+            ),
+            deleted: Vec::new(),
+        };
+        tui.update(available);
+        tui
+    }
+    fn update(&mut self, available: impl Iterator<Item = Available>) {
+        let mut rows = self.table.rows_mut();
+        rows.clear();
+        for available in available {
+            rows.push(AvailableRow {
+                source: HighlightLabel::new(available.feed.title.clone()),
+                title: HighlightLabel::new(available.title.clone()),
+                duration: HighlightLabel::new(if let Some(t) = available.duration_secs {
+                    format_duration_secs(t)
+                } else {
+                    "".to_owned()
+                }),
+                publication: HighlightLabel::new(available.publication.to_rfc3339()),
+                data: available,
+            });
+        }
+    }
 }
 
 impl Container<<Tui as ContainerProvider>::Parameters> for AvailableTable {
@@ -267,39 +320,6 @@ impl Widget for AvailableTable {
 
     fn draw(&self, window: Window, hints: RenderingHints) {
         self.table.draw(window, hints)
-    }
-}
-
-impl AvailableTable {
-    fn with_available(available: impl Iterator<Item = Available>) -> Self {
-        let mut tui = AvailableTable {
-            table: Table::new(
-                SeparatingStyle::AlternatingStyle(
-                    StyleModifier::new().bg_color(Color::ansi_rgb(0, 0, 0)),
-                ),
-                SeparatingStyle::Draw(GraphemeCluster::try_from('|').unwrap()),
-                StyleModifier::new(),
-            ),
-            deleted: Vec::new(),
-        };
-        tui.update(available);
-        tui
-    }
-    fn update(&mut self, available: impl Iterator<Item = Available>) {
-        let mut rows = self.table.rows_mut();
-        rows.clear();
-        for available in available {
-            rows.push(AvailableRow {
-                title: HighlightLabel::new(available.title.clone()),
-                duration: HighlightLabel::new(if let Some(t) = available.duration_secs {
-                    format_duration_secs(t)
-                } else {
-                    "".to_owned()
-                }),
-                publication: HighlightLabel::new(available.publication.to_rfc3339()),
-                data: available,
-            });
-        }
     }
 }
 
@@ -460,7 +480,7 @@ pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
                     tui.update(conn)?;
                 }
                 TuiMsg::AddAvailable(a) => {
-                    add_to_available(conn, None, &a)?;
+                    add_to_available(conn, &a)?;
                     tui.update(conn)?;
                 }
                 TuiMsg::AddActive(a) => {
@@ -476,7 +496,4 @@ pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
         }
     }
     Ok(())
-
-    //TODO
-    //fix tui layout
 }

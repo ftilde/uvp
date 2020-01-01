@@ -1,5 +1,5 @@
 use crate::data::{
-    find_in_active, make_active, remove_from_active, set_duration, set_playbackpos, set_title,
+    find_in_active, make_active, remove_from_active, set_duration, set_position_secs, set_title,
 };
 use rusqlite::Connection;
 
@@ -17,7 +17,7 @@ pub fn play(conn: &Connection, url: &str, mpv_binary: &str) -> Result<(), rusqli
         .arg(&active.url)
         .arg("--input-ipc-server")
         .arg(&pipe_path)
-        .arg(format!("--start=+{}", active.playbackpos))
+        .arg(format!("--start=+{}", active.position_secs))
         .spawn()
         .unwrap();
     while !pipe_path.exists() {
@@ -58,7 +58,7 @@ pub fn play(conn: &Connection, url: &str, mpv_binary: &str) -> Result<(), rusqli
     {
         remove_from_active(conn, &active.url)?;
     } else {
-        set_playbackpos(conn, &active.url, playback_time)?;
+        set_position_secs(conn, &active.url, playback_time)?;
         if let Some(d) = duration_secs {
             set_duration(conn, &active.url, d)?;
         }

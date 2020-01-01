@@ -1,4 +1,3 @@
-use crate::data::Available;
 use atom_syndication;
 use chrono::{DateTime, FixedOffset};
 use rss;
@@ -18,9 +17,16 @@ fn parse_time(s: &str) -> chrono::ParseResult<DateTime<FixedOffset>> {
     }
     DateTime::parse_from_rfc3339(s)
 }
+#[derive(Debug, Clone)]
+pub struct Entry {
+    pub title: String,
+    pub url: String,
+    pub publication: crate::data::DateTime,
+    pub duration_secs: Option<f64>,
+}
 
 impl FeedEntries {
-    pub fn entries(&self) -> Vec<Available> {
+    pub fn entries(&self) -> Vec<Entry> {
         match self {
             FeedEntries::Atom(f) => f.entries().iter().filter_map(entry_from_atom).collect(),
             FeedEntries::RSS(c) => c.items().iter().filter_map(entry_from_rss).collect(),
@@ -28,16 +34,16 @@ impl FeedEntries {
     }
 }
 
-fn entry_from_atom(entry: &atom_syndication::Entry) -> Option<Available> {
-    Some(Available {
+fn entry_from_atom(entry: &atom_syndication::Entry) -> Option<Entry> {
+    Some(Entry {
         title: entry.title().to_owned(),
         url: entry.links().first()?.href().to_owned(),
         publication: parse_time(entry.published()?).unwrap(),
         duration_secs: None, //TODO
     })
 }
-fn entry_from_rss(entry: &rss::Item) -> Option<Available> {
-    Some(Available {
+fn entry_from_rss(entry: &rss::Item) -> Option<Entry> {
+    Some(Entry {
         title: entry.title()?.to_owned(),
         url: entry.link()?.to_owned(),
         publication: parse_time(entry.pub_date()?).unwrap(),

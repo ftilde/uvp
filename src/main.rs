@@ -35,6 +35,8 @@ enum AddFeed {
         channel_name: String,
     },
     Mediathek {
+        #[structopt(long = "title", help = "Assign a title separate from the query")]
+        title: Option<String>,
         query: String,
     },
     Other {
@@ -163,7 +165,7 @@ fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
 
         for entry in fetched_feed.entries() {
             if feed.lastupdate.is_none() || feed.lastupdate.unwrap() < entry.publication {
-                ignore_constraint_errors(add_to_available(&conn, Some(feed.url.clone()), &entry))?;
+                ignore_constraint_errors(add_entry_to_available(&conn, feed.url.clone(), &entry))?;
             }
             lastpublication = if let Some(lastpublication) = lastpublication {
                 Some(entry.publication.max(lastpublication))
@@ -237,10 +239,10 @@ fn main() -> Result<(), Error> {
                         lastupdate: None,
                     }
                 }
-                AddFeed::Mediathek { query } => {
+                AddFeed::Mediathek { title, query } => {
                     let url = mediathek_url(&query);
                     Feed {
-                        title: query,
+                        title: if let Some(title) = title { title } else { query },
                         url,
                         lastupdate: None,
                     }
@@ -286,7 +288,7 @@ fn main() -> Result<(), Error> {
                 println!("{} \t| {} \t| {}", "Title", "Url", "Playback");
                 for entry in iter_active(&conn)? {
                     let title = entry.title.unwrap_or("Unkown".to_string());
-                    println!("{} \t| {} \t {}", title, entry.url, entry.playbackpos);
+                    println!("{} \t| {} \t {}", title, entry.url, entry.position_secs);
                 }
             }
         },
