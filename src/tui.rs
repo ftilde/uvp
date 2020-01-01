@@ -382,6 +382,11 @@ pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
         available: AvailableTable::with_available(iter_available(&conn)?.into_iter()),
     };
 
+    if tui.available.table.rows().is_empty() && tui.active.table.rows().is_empty() {
+        eprintln!("Neither active nor available entries. Have you added any feeds, yet?");
+        return Ok(());
+    }
+
     let layout = HSplit::new(vec![
         Box::new(Leaf::new(TuiComponents::Active)),
         Box::new(Leaf::new(TuiComponents::Available)),
@@ -493,6 +498,13 @@ pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
             let mut pass = stdin_read_lock.0.lock().unwrap();
             *pass = true;
             stdin_read_lock.1.notify_one();
+        }
+
+        // Avoid accidentally focusing empty table
+        if tui.available.table.rows().is_empty() {
+            manager.set_active(TuiComponents::Active);
+        } else if tui.active.table.rows().is_empty() {
+            manager.set_active(TuiComponents::Available);
         }
     }
     Ok(())
