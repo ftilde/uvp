@@ -13,6 +13,12 @@ mod tui;
 use data::*;
 use feeds::fetch;
 
+const DB_NAME: &'static str = "umc.db";
+const CONFIG_FILE_NAME: &'static str = "umc.toml";
+const DB_FILE_CONFIG_KEY: &'static str = "database_file";
+const MPV_BINARY_CONFIG_KEY: &'static str = "mpv_binary";
+const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
 #[derive(StructOpt)]
 enum Add {
     #[structopt(about = "Add a feed")]
@@ -112,11 +118,6 @@ fn ignore_constraint_errors(res: Result<(), rusqlite::Error>) -> Result<(), rusq
     }
 }
 
-const DB_NAME: &'static str = "umc.db";
-const CONFIG_FILE_NAME: &'static str = "umc.toml";
-const DB_FILE_CONFIG_KEY: &'static str = "database_file";
-const MPV_BINARY_CONFIG_KEY: &'static str = "mpv_binary";
-
 #[derive(Debug)]
 pub enum Error {
     Reqwest(reqwest::Error),
@@ -148,10 +149,11 @@ impl From<rusqlite::Error> for Error {
 
 
 fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let client = reqwest::ClientBuilder::new().timeout(FETCH_TIMEOUT).build().unwrap();
     let fetches = futures_util::future::join_all(iter_feeds(&conn)?.into_iter().map(|feed|
             async {
-                let fetched_feed = fetch(&feed.url).await.unwrap();
-                (fetched_feed, feed)
+                let fetch_result = fetch(&client, &feed.url).await;
+                (fetch_result, feed)
             }));
     let mut rt = tokio::runtime::Builder::new()
         .basic_scheduler()
@@ -160,9 +162,19 @@ fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
         .build()
         .unwrap();
     let fetched_feeds = rt.block_on(fetches);
-    for (fetched_feed, feed) in fetched_feeds {
+    for (fetch_result, feed) in fetched_feeds {
         let mut lastpublication = feed.lastupdate;
 
+        let fetched_feed = match fetch_result {
+            Ok(feed) => feed,
+            Err(Error::Reqwest(e)) => {
+                eprintln!("Failed to fetch feed {}: {}", feed.title, e);
+                continue;
+            }
+            Err(e) => {
+                panic!("Unexpected error during fetch: {:?}", e);
+            }
+        };
         for entry in fetched_feed.entries() {
             if feed.lastupdate.is_none() || feed.lastupdate.unwrap() < entry.publication {
                 ignore_constraint_errors(add_entry_to_available(&conn, feed.url.clone(), &entry))?;
