@@ -1,5 +1,4 @@
 use atom_syndication;
-use derive_more::*;
 use reqwest;
 use rss;
 use rusqlite::{params, Connection};
@@ -116,7 +115,7 @@ const CONFIG_FILE_NAME: &'static str = "umc.toml";
 const DB_FILE_CONFIG_KEY: &'static str = "database_file";
 const MPV_BINARY_CONFIG_KEY: &'static str = "mpv_binary";
 
-#[derive(From, Debug)]
+#[derive(Debug)]
 pub enum Error {
     Reqwest(reqwest::Error),
     RSS(rss::Error),
@@ -124,8 +123,30 @@ pub enum Error {
     DB(rusqlite::Error),
 }
 
+impl From<reqwest::Error> for Error {
+    fn from(error: reqwest::Error) -> Self {
+        Error::Reqwest(error)
+    }
+}
+impl From<rss::Error> for Error {
+    fn from(error: rss::Error) -> Self {
+        Error::RSS(error)
+    }
+}
+impl From<atom_syndication::Error> for Error {
+    fn from(error: atom_syndication::Error) -> Self {
+        Error::Atom(error)
+    }
+}
+impl From<rusqlite::Error> for Error {
+    fn from(error: rusqlite::Error) -> Self {
+        Error::DB(error)
+    }
+}
+
+
 fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
-    let fetches = futures::future::join_all(iter_feeds(&conn)?.into_iter().map(|feed|
+    let fetches = futures_util::future::join_all(iter_feeds(&conn)?.into_iter().map(|feed|
             async {
                 let fetched_feed = fetch(&feed.url).await.unwrap();
                 (fetched_feed, feed)
