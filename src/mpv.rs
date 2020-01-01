@@ -1,4 +1,6 @@
-use crate::data::{find_in_active, make_active, remove_from_active, set_duration, set_playbackpos};
+use crate::data::{
+    find_in_active, make_active, remove_from_active, set_duration, set_playbackpos, set_title,
+};
 use rusqlite::Connection;
 
 const END_DETECTION_TOLERANCE_SECONDS: f64 = 1.0;
@@ -27,8 +29,11 @@ pub fn play(conn: &Connection, url: &str, mpv_binary: &str) -> Result<(), rusqli
 
     mpv.observe_property(&0, "playback-time").unwrap();
     mpv.observe_property(&1, "duration").unwrap();
+    mpv.observe_property(&2, "media-title").unwrap();
+
     let mut playback_time = 0.0;
     let mut duration_secs = None;
+    let mut title = None;
     while let Ok(e) = mpv.event_listen() {
         if let mpvipc::Event::PropertyChange { property, .. } = e {
             match property {
@@ -37,6 +42,12 @@ pub fn play(conn: &Connection, url: &str, mpv_binary: &str) -> Result<(), rusqli
                 }
                 mpvipc::Property::Duration(Some(d)) => {
                     duration_secs = Some(d);
+                }
+                mpvipc::Property::Unknown {
+                    name,
+                    data: mpvipc::MpvDataType::String(t),
+                } if name == "media-title" => {
+                    title = Some(t);
                 }
                 _ => {}
             }
@@ -51,6 +62,9 @@ pub fn play(conn: &Connection, url: &str, mpv_binary: &str) -> Result<(), rusqli
         if let Some(d) = duration_secs {
             set_duration(conn, &active.url, d)?;
         }
+    }
+    if let (Some(new_title), None) = (title, active.title) {
+        set_title(conn, &active.url, &new_title)?;
     }
     output.wait().unwrap();
     Ok(())

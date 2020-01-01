@@ -285,7 +285,8 @@ fn main() -> Result<(), Error> {
             List::Active => {
                 println!("{} \t| {} \t| {}", "Title", "Url", "Playback");
                 for entry in iter_active(&conn)? {
-                    println!("{} \t| {} \t {}", entry.title, entry.url, entry.playbackpos);
+                    let title = entry.title.unwrap_or("Unkown".to_string());
+                    println!("{} \t| {} \t {}", title, entry.url, entry.playbackpos);
                 }
             }
         },

@@ -12,14 +12,14 @@ fn to_string(d: &DateTime) -> String {
 const TABLE_DEFINITION_ACTIVE: &'static str = r#"
 CREATE TABLE IF NOT EXISTS active (
     url            TEXT PRIMARY KEY,
-    title          TEXT NOT NULL,
+    title          TEXT,
     playbackpos    FLOAT NOT NULL,
     duration_secs  FLOAT
 );
 "#;
 #[derive(Debug, Clone)]
 pub struct Active {
-    pub title: String,
+    pub title: Option<String>,
     pub url: String,
     pub playbackpos: f64,
     pub duration_secs: Option<f64>,
@@ -221,7 +221,7 @@ pub fn make_active(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> 
             &conn,
             &Active {
                 url: url.to_owned(),
-                title: available.title,
+                title: Some(available.title),
                 playbackpos: 0.0,
                 duration_secs: available.duration_secs,
             },
@@ -232,7 +232,7 @@ pub fn make_active(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> 
             &conn,
             &Active {
                 url: url.to_owned(),
-                title: url.to_owned(),
+                title: None,
                 playbackpos: 0.0,
                 duration_secs: None,
             },
@@ -262,6 +262,15 @@ pub fn set_duration(
         UPDATE active SET duration_secs = ?1 WHERE url = ?2
         "#,
         params!(duration_secs, url),
+    )?;
+    Ok(())
+}
+pub fn set_title(conn: &Connection, url: &str, title: &str) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        r#"
+        UPDATE active SET title = ?1 WHERE url = ?2
+        "#,
+        params!(title, url),
     )?;
     Ok(())
 }

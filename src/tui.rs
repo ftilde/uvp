@@ -130,7 +130,7 @@ impl ActiveTable {
         rows.clear();
         for active in active {
             rows.push(ActiveRow {
-                title: HighlightLabel::new(active.title.clone()),
+                title: HighlightLabel::new(active.title.as_deref().unwrap_or("Unknown").to_owned()),
                 time: {
                     let label = if let Some(duration_secs) = active.duration_secs {
                         let progress_str = format_duration_secs(active.playbackpos);
