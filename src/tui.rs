@@ -191,7 +191,7 @@ impl Container<<Tui as ContainerProvider>::Parameters> for ActiveTable {
                     sender.send(TuiMsg::Delete(row.data.url.clone())).unwrap();
                 }
             }))
-            .chain((Key::Char('u'), || {
+            .chain((&[Key::Char('u'), Key::Delete][..], || {
                 if let Some(a) = self.deleted.pop() {
                     sender.send(TuiMsg::AddActive(a)).unwrap();
                 }
