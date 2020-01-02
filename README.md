@@ -38,8 +38,8 @@ SUBCOMMANDS:
 ```
 
 Additionally, a tui interface can be brought up using `uvp tui` which displays
-an overview of available and active videos and can be used to interactively
-select videos from either section for playing or removal.
+an overview of active (left) and available (right) videos and can be used to
+interactively select videos from either section for playing or removal.
 
 ### Screenshot
 ![](screenshot.png)
