@@ -1,9 +1,11 @@
 # uvp
 
 uvp is mixed cli/tui podcatcher and player application intended to be used for
-video feeds.  So far it has special support for youtube channels and queries of
-the german public broadcasting multimedia library (via
-[mediathekview](https://mediathekviewweb.de/)), but other feeds can also be
+video feeds.
+
+So far it has special support for youtube channels and queries of the German
+public broadcasting multimedia library (via
+[mediathekviewweb](https://mediathekviewweb.de/)), but other feeds can also be
 added.  For video playback uvp uses [mpv](https://mpv.io) which therefore must
 be installed on the system.  All persistent data is stored in an
 [sqlite](https://sqlite.org/index.html)-database.
@@ -64,9 +66,9 @@ $ target/release/uvp
 Additionally, working installations of both sqlite and mpv are required.
 
 ## Configuration
-uvp can be configured using a config file that can be placed in the usual
-locations (`/etc` or `/usr/etc/`, users configuration directory). An example
-configuration file can be found in this repository (`uvp.toml.sample`).
+uvp can be configured using a configuration file that can be placed in the
+usual locations (`/etc` or `/usr/etc/`, users configuration directory). An
+example configuration file can be found in this repository (`uvp.toml.sample`).
 
 ## Licensing
 
