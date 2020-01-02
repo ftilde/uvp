@@ -35,20 +35,22 @@ struct AddVideo {
 
 #[derive(StructOpt)]
 enum AddFeed {
+    #[structopt(about = "Add a youtube channel feed")]
     Youtube {
-        #[structopt(long = "id", help = "Fetch using the channel id")]
+        #[structopt(short = "i", long = "id", help = "Fetch using the channel id")]
         channel_id: Option<String>,
         channel_name: String,
     },
+    #[structopt(about = "Add a query of the German public broadcast multimedia library")]
     Mediathek {
-        #[structopt(long = "title", help = "Assign a title separate from the query")]
+        #[structopt(short = "t", long = "title", help = "Assign a title separate from the query")]
         title: Option<String>,
         query: String,
     },
+    #[structopt(about = "Add a custom feed via URL")]
     Other {
-        #[structopt(short = "t", long = "title", help = "Title")]
-        title: String,
-        #[structopt(short = "u", long = "url", help = "URL")]
+        #[structopt(short = "t", long = "title", help = "Assign a title other than the URL")]
+        title: Option<String>,
         url: String,
     },
 }
@@ -263,7 +265,7 @@ fn main() -> Result<(), Error> {
                     }
                 }
                 AddFeed::Other { title, url } => Feed {
-                    title,
+                    title: if let Some(title) = title { title } else { url.clone() },
                     url,
                     lastupdate: None,
                 },
