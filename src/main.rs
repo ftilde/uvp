@@ -13,8 +13,8 @@ mod tui;
 use data::*;
 use feeds::fetch;
 
-const DB_NAME: &'static str = "umc.db";
-const CONFIG_FILE_NAME: &'static str = "umc.toml";
+const DB_NAME: &'static str = "uvp.db";
+const CONFIG_FILE_NAME: &'static str = "uvp.toml";
 const DB_FILE_CONFIG_KEY: &'static str = "database_file";
 const MPV_BINARY_CONFIG_KEY: &'static str = "mpv_binary";
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
@@ -66,7 +66,6 @@ struct Remove {
 }
 
 #[derive(StructOpt)]
-#[structopt(help = "List something")]
 enum List {
     #[structopt(about = "List feeds")]
     Feeds,
@@ -77,17 +76,17 @@ enum List {
 }
 
 #[derive(StructOpt)]
-#[structopt()]
+#[structopt(author, about)]
 enum Options {
-    #[structopt(about = "Add a feed")]
+    #[structopt(about = "Add a feed or video")]
     Add(Add),
     #[structopt(about = "Refresh the list of available videos")]
     Refresh,
-    #[structopt(about = "List parts of database")]
+    #[structopt(about = "List feeds, available or active videos")]
     List(List),
-    #[structopt(about = "Play a video")]
+    #[structopt(about = "Play an (external) video")]
     Play(Play),
-    #[structopt(about = "Remove an item from the list of available videos")]
+    #[structopt(about = "Remove an item from the list of available/active videos")]
     Remove(Remove),
     #[structopt(about = "Start an interactive tui for video selection")]
     Tui,
@@ -205,7 +204,11 @@ fn main() -> Result<(), Error> {
     settings.set_default(DB_FILE_CONFIG_KEY, default_db_path.to_string_lossy().as_ref()).unwrap();
     settings.set_default(MPV_BINARY_CONFIG_KEY, "mpv").unwrap();
 
-    for config_location in vec![Some(PathBuf::from("/etc")), dirs::config_dir(), Some(PathBuf::from("./"))] {
+    for config_location in vec![
+        Some(PathBuf::from("/etc")),
+        Some(PathBuf::from("/usr/etc")),
+        dirs::config_dir(),
+    ] {
         if let Some(config_location) = config_location {
             let config_file = config_location.join(CONFIG_FILE_NAME);
             if config_file.is_file() {
