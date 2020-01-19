@@ -372,6 +372,10 @@ enum TuiComponents {
     Active,
 }
 
+enum InputLoopMsg {
+    Continue,
+}
+
 pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
     refresh(&conn)?;
 
@@ -394,11 +398,9 @@ pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
     let mut manager = ContainerManager::<Tui>::from_layout(Box::new(layout));
 
     let (signals_sender, tui_receiver) = std::sync::mpsc::sync_channel(0);
+    let (input_continue_sender, input_continue_receiver) = std::sync::mpsc::sync_channel(0);
 
-    let stdin_read_lock =
-        std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
     let input_sender = signals_sender.clone();
-    let stdin_read_lock_loop = stdin_read_lock.clone();
     let _input_handler = std::thread::spawn(move || {
         let stdin = std::io::stdin();
         let stdin = stdin.lock();
@@ -406,10 +408,11 @@ pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
             let input = input.unwrap();
             input_sender.send(Msg::Input(input)).unwrap();
 
-            let &(ref lock, ref cvar) = &*stdin_read_lock_loop;
-            let mut allowed_to_pass = lock.lock().unwrap();
-            while !*allowed_to_pass {
-                allowed_to_pass = cvar.wait(allowed_to_pass).unwrap();
+            // We can only continue processing input once the tui main loop is done with the
+            // current iteration in case mpv needs to take over the terminal.
+            // For this reason we wait here for the continue message.
+            if input_continue_receiver.recv().is_err() {
+                break;
             }
         }
     });
@@ -442,12 +445,7 @@ pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
         }
         term.present();
 
-        // Do not let input loop start another iteration just yet.
-        // In case we want to play a video, mpv needs full access to the terminal, including stdin!
-        {
-            let mut pass = stdin_read_lock.0.lock().unwrap();
-            *pass = false;
-        }
+        let mut input_continue_msg = None;
         if let Ok(msg) = tui_receiver.recv() {
             match msg {
                 Msg::Input(input) => {
@@ -464,6 +462,7 @@ pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
                                 .right_on(Key::Char('l'))
                                 .right_on(Key::Right),
                         );
+                    input_continue_msg = Some(InputLoopMsg::Continue);
                 }
                 Msg::Redraw => {}
             }
@@ -494,10 +493,8 @@ pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
                 }
             }
         }
-        {
-            let mut pass = stdin_read_lock.0.lock().unwrap();
-            *pass = true;
-            stdin_read_lock.1.notify_one();
+        if let Some(m) = input_continue_msg {
+            input_continue_sender.send(m).unwrap();
         }
 
         // Avoid accidentally focusing empty table
