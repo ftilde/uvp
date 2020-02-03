@@ -15,8 +15,10 @@ pub fn play(conn: &Connection, url: &str, mpv_binary: &str) -> Result<(), rusqli
 
     let mut output = std::process::Command::new(mpv_binary)
         .arg(&active.url)
-        .arg("--input-ipc-server")
-        .arg(&pipe_path)
+        .arg(format!(
+            "--input-ipc-server={}",
+            pipe_path.to_string_lossy()
+        ))
         .arg(format!("--start=+{}", active.position_secs))
         .spawn()
         .unwrap();
