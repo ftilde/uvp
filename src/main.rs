@@ -43,13 +43,21 @@ enum AddFeed {
     },
     #[structopt(about = "Add a query of the German public broadcast multimedia library")]
     Mediathek {
-        #[structopt(short = "t", long = "title", help = "Assign a title separate from the query")]
+        #[structopt(
+            short = "t",
+            long = "title",
+            help = "Assign a title separate from the query"
+        )]
         title: Option<String>,
         query: String,
     },
     #[structopt(about = "Add a custom feed via URL")]
     Other {
-        #[structopt(short = "t", long = "title", help = "Assign a title other than the URL")]
+        #[structopt(
+            short = "t",
+            long = "title",
+            help = "Assign a title other than the URL"
+        )]
         title: Option<String>,
         url: String,
     },
@@ -148,14 +156,16 @@ impl From<rusqlite::Error> for Error {
     }
 }
 
-
 fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
-    let client = reqwest::ClientBuilder::new().timeout(FETCH_TIMEOUT).build().unwrap();
-    let fetches = futures_util::future::join_all(iter_feeds(&conn)?.into_iter().map(|feed|
-            async {
-                let fetch_result = fetch(&client, &feed.url).await;
-                (fetch_result, feed)
-            }));
+    let client = reqwest::ClientBuilder::new()
+        .timeout(FETCH_TIMEOUT)
+        .build()
+        .unwrap();
+    let fetches =
+        futures_util::future::join_all(iter_feeds(&conn)?.into_iter().map(|feed| async {
+            let fetch_result = fetch(&client, &feed.url).await;
+            (fetch_result, feed)
+        }));
     let mut rt = tokio::runtime::Builder::new()
         .basic_scheduler()
         .enable_io()
@@ -170,6 +180,14 @@ fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
             Ok(feed) => feed,
             Err(Error::Reqwest(e)) => {
                 eprintln!("Failed to fetch feed {}: {}", feed.title, e);
+                continue;
+            }
+            Err(Error::RSS(e)) => {
+                eprintln!("Failed to parse feed {}: {}", feed.title, e);
+                continue;
+            }
+            Err(Error::Atom(e)) => {
+                eprintln!("Failed to parse feed {}: {}", feed.title, e);
                 continue;
             }
             Err(e) => {
@@ -203,7 +221,12 @@ fn main() -> Result<(), Error> {
         .unwrap_or(Path::new("./").to_owned())
         .join(DB_NAME);
 
-    settings.set_default(DB_FILE_CONFIG_KEY, default_db_path.to_string_lossy().as_ref()).unwrap();
+    settings
+        .set_default(
+            DB_FILE_CONFIG_KEY,
+            default_db_path.to_string_lossy().as_ref(),
+        )
+        .unwrap();
     settings.set_default(MPV_BINARY_CONFIG_KEY, "mpv").unwrap();
 
     for config_location in vec![
@@ -224,7 +247,6 @@ fn main() -> Result<(), Error> {
 
     let db_path = settings.get_str(DB_FILE_CONFIG_KEY).unwrap();
     let mpv_binary = settings.get_str(MPV_BINARY_CONFIG_KEY).unwrap();
-
 
     //let flags = OpenFlags::SQLITE_OPEN_FULL_MUTEX;
     //let conn = Connection::open_with_flags(db_path, flags).unwrap();
@@ -259,13 +281,21 @@ fn main() -> Result<(), Error> {
                 AddFeed::Mediathek { title, query } => {
                     let url = mediathek_url(&query);
                     Feed {
-                        title: if let Some(title) = title { title } else { query },
+                        title: if let Some(title) = title {
+                            title
+                        } else {
+                            query
+                        },
                         url,
                         lastupdate: None,
                     }
                 }
                 AddFeed::Other { title, url } => Feed {
-                    title: if let Some(title) = title { title } else { url.clone() },
+                    title: if let Some(title) = title {
+                        title
+                    } else {
+                        url.clone()
+                    },
                     url,
                     lastupdate: None,
                 },
@@ -304,7 +334,7 @@ fn main() -> Result<(), Error> {
             List::Active => {
                 println!("{} \t| {} \t| {}", "Title", "Url", "Playback");
                 for entry in iter_active(&conn)? {
-                    let title = entry.title.unwrap_or("Unkown".to_string());
+                    let title = entry.title.unwrap_or("Unknown".to_string());
                     println!("{} \t| {} \t {}", title, entry.url, entry.position_secs);
                 }
             }
