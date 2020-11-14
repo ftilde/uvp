@@ -7,6 +7,7 @@ use rusqlite::Connection;
 use signal_hook::iterator::Signals;
 use unsegen::base::{Color, GraphemeCluster, StyleModifier, Window};
 use unsegen::container::{Container, ContainerManager, ContainerProvider, HSplit, Leaf};
+use unsegen::input::ScrollBehavior;
 use unsegen::input::{Input, Key, NavigateBehavior};
 use unsegen::widget::{
     builtin::{Column, LineLabel, Table, TableRow},
@@ -203,6 +204,11 @@ impl Container<<Tui as ContainerProvider>::Parameters> for ActiveTable {
                     .down_on(Key::Char('j'))
                     .down_on(Key::Down),
             )
+            .chain(
+                ScrollBehavior::new(&mut self.table)
+                    .to_end_on(Key::Char('G'))
+                    .to_beginning_on(Key::Char('g')),
+            )
             .finish()
     }
 }
@@ -308,6 +314,11 @@ impl Container<<Tui as ContainerProvider>::Parameters> for AvailableTable {
                     .up_on(Key::Up)
                     .down_on(Key::Char('j'))
                     .down_on(Key::Down),
+            )
+            .chain(
+                ScrollBehavior::new(&mut self.table)
+                    .to_end_on(Key::Char('G'))
+                    .to_beginning_on(Key::Char('g')),
             )
             .finish()
     }
