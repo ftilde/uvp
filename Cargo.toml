@@ -1,7 +1,7 @@
 [package]
 name = "uvp"
 version = "0.1.0"
-authors = ["ftilde <ftilde@protonmail.com>"]
+authors = ["ftilde <ftilde@tamepointer.de>"]
 description = "A video-focused cmdline/tui podcatcher"
 repository = "https://github.com/ftilde/uvp"
 readme = "README.md"

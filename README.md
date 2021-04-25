@@ -17,7 +17,7 @@ All functionality of uvp is available via the command line interface.
 ```
 $ uvp --help
 uvp 0.1.0
-ftilde <ftilde@protonmail.com>
+ftilde <ftilde@REDACTED>
 A video-focused cmdline/tui podcatcher
 
 USAGE:
