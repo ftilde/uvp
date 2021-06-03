@@ -10,8 +10,8 @@ use unsegen::container::{Container, ContainerManager, ContainerProvider, HSplit,
 use unsegen::input::ScrollBehavior;
 use unsegen::input::{Input, Key, NavigateBehavior};
 use unsegen::widget::{
-    builtin::{Column, LineLabel, Table, TableRow},
-    ColDemand, Demand2D, RenderingHints, RowDemand, SeparatingStyle, Widget,
+    builtin::{Column, Table, TableRow},
+    ColDemand, Demand2D, RenderingHints, RowDemand, SeparatingStyle, Widget, WidgetExt,
 };
 
 use chrono::Duration;
@@ -48,65 +48,46 @@ impl Widget for Padding {
     fn draw(&self, _win: Window, _hints: RenderingHints) {}
 }
 
-struct HighlightLabel {
-    inner: LineLabel,
-}
-
-impl HighlightLabel {
-    fn new(content: String) -> Self {
-        HighlightLabel {
-            inner: LineLabel::new(content),
-        }
+fn highlight_active(mut window: Window, hints: RenderingHints) -> Window {
+    if hints.active {
+        window.set_default_style(
+            StyleModifier::new()
+                .invert(true)
+                .bold(true)
+                .apply_to_default(),
+        );
     }
-}
-
-impl Widget for HighlightLabel {
-    fn space_demand(&self) -> Demand2D {
-        self.inner.space_demand()
-    }
-
-    fn draw(&self, mut window: Window, hints: RenderingHints) {
-        if hints.active {
-            window.set_default_style(
-                StyleModifier::new()
-                    .invert(true)
-                    .bold(true)
-                    .apply_to_default(),
-            );
-        }
-        self.inner.draw(window, hints)
-    }
+    window
 }
 
 struct ActiveRow {
-    source: HighlightLabel,
-    title: HighlightLabel,
-    time: HighlightLabel,
-    padding: Padding,
+    source: String,
+    title: String,
+    time: String,
     data: Active,
 }
 
 impl TableRow for ActiveRow {
+    type BehaviorContext = ();
     const COLUMNS: &'static [Column<ActiveRow>] = &[
         Column {
-            access: |r| &r.source,
-            access_mut: |r| &mut r.source,
-            behavior: |_, i| Some(i),
+            access: |r| Box::new(r.source.as_str().with_window(highlight_active)),
+            behavior: |_, i, _| Some(i),
         },
         Column {
-            access: |r| &r.title,
-            access_mut: |r| &mut r.title,
-            behavior: |_, i| Some(i),
+            access: |r| Box::new(r.title.as_str().with_window(highlight_active)),
+            behavior: |_, i, _| Some(i),
         },
         Column {
-            access: |r| &r.time,
-            access_mut: |r| &mut r.time,
-            behavior: |_, i| Some(i),
-        },
-        Column {
-            access: |r| &r.padding,
-            access_mut: |r| &mut r.padding,
-            behavior: |_, i| Some(i),
+            access: |r| {
+                Box::new(r.time.as_str().with_window(highlight_active).with_demand(
+                    |d: Demand2D| Demand2D {
+                        width: ColDemand::at_least(d.width.min),
+                        height: d.height,
+                    },
+                ))
+            },
+            behavior: |_, i, _| Some(i),
         },
     ];
 }
@@ -119,13 +100,7 @@ struct ActiveTable {
 impl ActiveTable {
     fn with_active(active: impl Iterator<Item = Active>) -> Self {
         let mut tui = ActiveTable {
-            table: Table::new(
-                SeparatingStyle::AlternatingStyle(
-                    StyleModifier::new().bg_color(Color::ansi_rgb(0, 0, 0)),
-                ),
-                SeparatingStyle::Draw(GraphemeCluster::try_from('|').unwrap()),
-                StyleModifier::new(),
-            ),
+            table: Table::new(),
             deleted: Vec::new(),
         };
         tui.update(active);
@@ -137,14 +112,12 @@ impl ActiveTable {
         rows.clear();
         for active in active {
             rows.push(ActiveRow {
-                source: HighlightLabel::new(
-                    active
-                        .feed_title
-                        .as_deref()
-                        .unwrap_or("External")
-                        .to_owned(),
-                ),
-                title: HighlightLabel::new(active.title.as_deref().unwrap_or("Unknown").to_owned()),
+                source: active
+                    .feed_title
+                    .as_deref()
+                    .unwrap_or("External")
+                    .to_owned(),
+                title: active.title.as_deref().unwrap_or("Unknown").to_owned(),
                 time: {
                     let label = if let Some(duration_secs) = active.duration_secs {
                         let progress_str = format_duration_secs(active.position_secs);
@@ -155,34 +128,23 @@ impl ActiveTable {
                         format_duration_secs(active.position_secs)
                     };
 
-                    HighlightLabel::new(label)
+                    label
                 },
-                padding: Padding,
                 data: active,
             });
         }
     }
 }
 
-impl Widget for ActiveTable {
-    fn space_demand(&self) -> Demand2D {
-        self.table.space_demand()
-    }
-
-    fn draw(&self, window: Window, hints: RenderingHints) {
-        self.table.draw(window, hints)
-    }
-}
-
-impl Container<<Tui as ContainerProvider>::Parameters> for ActiveTable {
+impl Container<<Tui as ContainerProvider>::Context> for ActiveTable {
     fn input(
         &mut self,
         input: Input,
-        sender: &mut <Tui as ContainerProvider>::Parameters,
+        sender: &mut <Tui as ContainerProvider>::Context,
     ) -> Option<Input> {
         input
             .chain((Key::Char('\n'), || {
-                if let Some(row) = self.table.current_row_mut() {
+                if let Some(row) = self.table.current_row() {
                     sender.send(TuiMsg::Play(row.data.url.clone())).unwrap();
                 }
             }))
@@ -211,37 +173,57 @@ impl Container<<Tui as ContainerProvider>::Parameters> for ActiveTable {
             )
             .finish()
     }
+
+    fn as_widget<'a>(&'a self) -> Box<dyn Widget + 'a> {
+        Box::new(
+            self.table
+                .as_widget()
+                .row_separation(SeparatingStyle::AlternatingStyle(
+                    StyleModifier::new().bg_color(Color::ansi_rgb(0, 0, 0)),
+                ))
+                .col_separation(SeparatingStyle::Draw(
+                    GraphemeCluster::try_from('|').unwrap(),
+                )),
+        )
+    }
 }
 
 struct AvailableRow {
-    source: HighlightLabel,
-    title: HighlightLabel,
-    duration: HighlightLabel,
-    publication: HighlightLabel,
+    source: String,
+    title: String,
+    duration: String,
+    publication: String,
     data: Available,
 }
 
 impl TableRow for AvailableRow {
+    type BehaviorContext = ();
     const COLUMNS: &'static [Column<AvailableRow>] = &[
         Column {
-            access: |r| &r.source,
-            access_mut: |r| &mut r.source,
-            behavior: |_, i| Some(i),
+            access: |r| Box::new(r.source.as_str().with_window(highlight_active)),
+            behavior: |_, i, _| Some(i),
         },
         Column {
-            access: |r| &r.title,
-            access_mut: |r| &mut r.title,
-            behavior: |_, i| Some(i),
+            access: |r| Box::new(r.title.as_str().with_window(highlight_active)),
+            behavior: |_, i, _| Some(i),
         },
         Column {
-            access: |r| &r.duration,
-            access_mut: |r| &mut r.duration,
-            behavior: |_, i| Some(i),
+            access: |r| Box::new(r.duration.as_str().with_window(highlight_active)),
+            behavior: |_, i, _| Some(i),
         },
         Column {
-            access: |r| &r.publication,
-            access_mut: |r| &mut r.publication,
-            behavior: |_, i| Some(i),
+            access: |r| {
+                Box::new(
+                    r.publication
+                        .as_str()
+                        .with_window(highlight_active)
+                        .with_demand(|d: Demand2D| Demand2D {
+                            width: ColDemand::at_least(d.width.min),
+                            height: d.height,
+                        }),
+                )
+            },
+            behavior: |_, i, _| Some(i),
         },
     ];
 }
@@ -254,13 +236,7 @@ struct AvailableTable {
 impl AvailableTable {
     fn with_available(available: impl Iterator<Item = Available>) -> Self {
         let mut tui = AvailableTable {
-            table: Table::new(
-                SeparatingStyle::AlternatingStyle(
-                    StyleModifier::new().bg_color(Color::ansi_rgb(0, 0, 0)),
-                ),
-                SeparatingStyle::Draw(GraphemeCluster::try_from('|').unwrap()),
-                StyleModifier::new(),
-            ),
+            table: Table::new(),
             deleted: Vec::new(),
         };
         tui.update(available);
@@ -271,25 +247,25 @@ impl AvailableTable {
         rows.clear();
         for available in available {
             rows.push(AvailableRow {
-                source: HighlightLabel::new(available.feed.title.clone()),
-                title: HighlightLabel::new(available.title.clone()),
-                duration: HighlightLabel::new(if let Some(t) = available.duration_secs {
+                source: available.feed.title.clone(),
+                title: available.title.clone(),
+                duration: if let Some(t) = available.duration_secs {
                     format_duration_secs(t)
                 } else {
                     "".to_owned()
-                }),
-                publication: HighlightLabel::new(available.publication.to_rfc3339()),
+                },
+                publication: available.publication.to_rfc3339(),
                 data: available,
             });
         }
     }
 }
 
-impl Container<<Tui as ContainerProvider>::Parameters> for AvailableTable {
+impl Container<<Tui as ContainerProvider>::Context> for AvailableTable {
     fn input(
         &mut self,
         input: Input,
-        sender: &mut <Tui as ContainerProvider>::Parameters,
+        sender: &mut <Tui as ContainerProvider>::Context,
     ) -> Option<Input> {
         input
             .chain((Key::Char('\n'), || {
@@ -322,15 +298,18 @@ impl Container<<Tui as ContainerProvider>::Parameters> for AvailableTable {
             )
             .finish()
     }
-}
 
-impl Widget for AvailableTable {
-    fn space_demand(&self) -> Demand2D {
-        self.table.space_demand()
-    }
-
-    fn draw(&self, window: Window, hints: RenderingHints) {
-        self.table.draw(window, hints)
+    fn as_widget<'a>(&'a self) -> Box<dyn Widget + 'a> {
+        Box::new(
+            self.table
+                .as_widget()
+                .row_separation(SeparatingStyle::AlternatingStyle(
+                    StyleModifier::new().bg_color(Color::ansi_rgb(0, 0, 0)),
+                ))
+                .col_separation(SeparatingStyle::Draw(
+                    GraphemeCluster::try_from('|').unwrap(),
+                )),
+        )
     }
 }
 
@@ -358,9 +337,9 @@ impl Tui {
     }
 }
 impl ContainerProvider for Tui {
-    type Parameters = std::sync::mpsc::SyncSender<TuiMsg>;
+    type Context = std::sync::mpsc::SyncSender<TuiMsg>;
     type Index = TuiComponents;
-    fn get<'a, 'b: 'a>(&'b self, index: &'a Self::Index) -> &'b dyn Container<Self::Parameters> {
+    fn get<'a, 'b: 'a>(&'b self, index: &'a Self::Index) -> &'b dyn Container<Self::Context> {
         match index {
             &TuiComponents::Available => &self.available,
             &TuiComponents::Active => &self.active,
@@ -369,7 +348,7 @@ impl ContainerProvider for Tui {
     fn get_mut<'a, 'b: 'a>(
         &'b mut self,
         index: &'a Self::Index,
-    ) -> &'b mut dyn Container<Self::Parameters> {
+    ) -> &'b mut dyn Container<Self::Context> {
         match index {
             &TuiComponents::Available => &mut self.available,
             &TuiComponents::Active => &mut self.active,
@@ -403,8 +382,8 @@ pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
     }
 
     let layout = HSplit::new(vec![
-        Box::new(Leaf::new(TuiComponents::Active)),
-        Box::new(Leaf::new(TuiComponents::Available)),
+        (Box::new(Leaf::new(TuiComponents::Active)), 1.0),
+        (Box::new(Leaf::new(TuiComponents::Available)), 1.0),
     ]);
     let mut manager = ContainerManager::<Tui>::from_layout(Box::new(layout));
 
