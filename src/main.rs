@@ -70,9 +70,11 @@ struct Play {
 }
 
 #[derive(StructOpt)]
-struct Remove {
-    #[structopt(help = "url")]
-    url: String,
+enum Remove {
+    #[structopt(about = "Remove a feed via its url")]
+    Feed { url: String },
+    #[structopt(about = "Remove a video via its url")]
+    Video { url: String },
 }
 
 #[derive(StructOpt)]
@@ -339,8 +341,11 @@ fn main() -> Result<(), Error> {
                 }
             }
         },
-        Options::Remove(remove) => {
-            remove_from_available(&conn, &remove.url)?;
+        Options::Remove(Remove::Video { url }) => {
+            remove_from_available(&conn, &url)?;
+        }
+        Options::Remove(Remove::Feed { url }) => {
+            remove_feed(&conn, &url)?;
         }
         Options::Refresh => {
             refresh(&conn)?;

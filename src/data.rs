@@ -96,6 +96,15 @@ pub fn add_to_feed(conn: &Connection, feed: &Feed) -> Result<(), rusqlite::Error
     )?;
     Ok(())
 }
+pub fn remove_feed(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        r#"
+        DELETE FROM feed WHERE feedurl = ?1
+        "#,
+        params!(url),
+    )?;
+    Ok(())
+}
 
 /// Available ------------------------------------------------------------------
 pub fn iter_available(conn: &Connection) -> Result<Vec<Available>, rusqlite::Error> {
