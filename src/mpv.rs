@@ -29,9 +29,9 @@ pub fn play(conn: &Connection, url: &str, mpv_binary: &str) -> Result<(), rusqli
 
     //TODO get title?
 
-    mpv.observe_property(&0, "playback-time").unwrap();
-    mpv.observe_property(&1, "duration").unwrap();
-    mpv.observe_property(&2, "media-title").unwrap();
+    mpv.observe_property(0, "playback-time").unwrap();
+    mpv.observe_property(1, "duration").unwrap();
+    mpv.observe_property(2, "media-title").unwrap();
 
     let mut playback_time = None;
     let mut duration_secs = None;
