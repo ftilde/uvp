@@ -20,6 +20,7 @@ pub fn play(conn: &Connection, url: &str, mpv_binary: &str) -> Result<(), rusqli
             pipe_path.to_string_lossy()
         ))
         .arg(format!("--start=+{}", active.position_secs))
+        .arg("--force-window=immediate")
         .spawn()
         .unwrap();
     while !pipe_path.exists() {
