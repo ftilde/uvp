@@ -369,8 +369,6 @@ enum InputLoopMsg {
 pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
     refresh(&conn)?;
 
-    let stdout = std::io::stdout();
-    let mut term = unsegen::base::Terminal::new(stdout.lock()).unwrap();
     let mut tui = Tui {
         active: ActiveTable::with_active(iter_active(&conn)?.into_iter()),
         available: AvailableTable::with_available(iter_available(&conn)?.into_iter()),
@@ -380,6 +378,9 @@ pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
         eprintln!("Neither active nor available entries. Have you added any feeds, yet?");
         return Ok(());
     }
+
+    let stdout = std::io::stdout();
+    let mut term = unsegen::base::Terminal::new(stdout.lock()).unwrap();
 
     let layout = HSplit::new(vec![
         (Box::new(Leaf::new(TuiComponents::Active)), 1.0),
