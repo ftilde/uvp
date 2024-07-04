@@ -1,2 +1,8 @@
 #database_file = "/path/to/db/file.db"
 #mpv_binary = "/path/to/alternate/mpv"
+
+#[theme]
+#primary_fg = "default"
+#primary_bg = "default"
+#alt_fg = 15
+#alt_bg = 8

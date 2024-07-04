@@ -2,8 +2,13 @@ use atom_syndication;
 use reqwest;
 use rss;
 use rusqlite::{params, Connection};
-use std::path::{Path, PathBuf};
+use std::{
+    convert::{TryFrom, TryInto},
+    iter::FromIterator,
+    path::{Path, PathBuf},
+};
 use structopt::StructOpt;
+use unsegen::base::Color;
 
 mod data;
 mod feeds;
@@ -17,6 +22,7 @@ const DB_NAME: &'static str = "uvp.db";
 const CONFIG_FILE_NAME: &'static str = "uvp.toml";
 const DB_FILE_CONFIG_KEY: &'static str = "database_file";
 const MPV_BINARY_CONFIG_KEY: &'static str = "mpv_binary";
+const THEME_CONFIG_KEY: &'static str = "theme";
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 #[derive(StructOpt)]
@@ -135,6 +141,7 @@ pub enum Error {
     RSS(rss::Error),
     Atom(atom_syndication::Error),
     DB(rusqlite::Error),
+    Config(config::ConfigError),
 }
 
 impl From<reqwest::Error> for Error {
@@ -155,6 +162,17 @@ impl From<atom_syndication::Error> for Error {
 impl From<rusqlite::Error> for Error {
     fn from(error: rusqlite::Error) -> Self {
         Error::DB(error)
+    }
+}
+impl From<config::ConfigError> for Error {
+    fn from(error: config::ConfigError) -> Self {
+        Error::Config(error)
+    }
+}
+
+impl From<std::num::ParseIntError> for Error {
+    fn from(value: std::num::ParseIntError) -> Self {
+        Error::Config(config::ConfigError::Foreign(Box::new(value)))
     }
 }
 
@@ -217,19 +235,103 @@ fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
     }
     Ok(())
 }
+
+struct Theme {
+    primary_fg: Color,
+    primary_bg: Color,
+    alt_fg: Color,
+    alt_bg: Color,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Theme {
+            primary_fg: Color::Default,
+            primary_bg: Color::Default,
+            alt_fg: Color::Default,
+            alt_bg: Color::Ansi(8),
+        }
+    }
+}
+
+impl Theme {
+    const KEYS: &'static [&'static str] = &["primary_fg", "primary_bg", "alt_fg", "alt_bg"];
+}
+
+impl TryFrom<config::Map<String, config::Value>> for Theme {
+    type Error = Error;
+
+    fn try_from(value: config::Map<String, config::Value>) -> Result<Self, Self::Error> {
+        let mut theme = Theme::default();
+
+        for key in Self::KEYS {
+            if let Ok(v) = value
+                .get(*key)
+                .ok_or(config::ConfigError::NotFound(key.to_string()))
+                .and_then(|v| v.clone().into_string())
+            {
+                let value = match v.as_str() {
+                    "default" => Color::Default,
+                    _ => Color::Ansi(v.parse::<u8>()?),
+                };
+
+                match *key {
+                    "primary_fg" => theme.primary_fg = value,
+                    "primary_bg" => theme.primary_bg = value,
+                    "alt_fg" => theme.alt_fg = value,
+                    "alt_bg" => theme.alt_bg = value,
+                    _ => continue,
+                }
+            }
+        }
+
+        Ok(theme)
+    }
+}
+
+impl From<Theme> for config::Value {
+    fn from(value: Theme) -> Self {
+        let values = [
+            value.primary_fg,
+            value.primary_bg,
+            value.alt_fg,
+            value.alt_bg,
+        ];
+
+        let map = values.iter().zip(Theme::KEYS).map(|(v, k)| {
+            let color_code = match v {
+                Color::Ansi(n) => n.to_string(),
+                Color::Default => "default".to_string(),
+                _ => unreachable!(),
+            };
+            (
+                (*k).to_owned(),
+                config::Value::new(
+                    Some(&(*k).to_owned()),
+                    config::ValueKind::String(color_code),
+                ),
+            )
+        });
+
+        config::Value::new(
+            Some(&THEME_CONFIG_KEY.to_owned()),
+            config::ValueKind::Table(config::Map::from_iter(map.into_iter())),
+        )
+    }
+}
+
 fn main() -> Result<(), Error> {
-    let mut settings = config::Config::default();
     let default_db_path = dirs::data_dir()
         .unwrap_or(Path::new("./").to_owned())
         .join(DB_NAME);
 
-    settings
+    let mut settings_builder = config::Config::builder()
         .set_default(
             DB_FILE_CONFIG_KEY,
             default_db_path.to_string_lossy().as_ref(),
-        )
-        .unwrap();
-    settings.set_default(MPV_BINARY_CONFIG_KEY, "mpv").unwrap();
+        )?
+        .set_default(MPV_BINARY_CONFIG_KEY, "mpv")?
+        .set_default(THEME_CONFIG_KEY, Theme::default())?;
 
     for config_location in vec![
         Some(PathBuf::from("/etc")),
@@ -239,16 +341,20 @@ fn main() -> Result<(), Error> {
         if let Some(config_location) = config_location {
             let config_file = config_location.join(CONFIG_FILE_NAME);
             if config_file.is_file() {
-                let config_file_name = config_file.to_string_lossy();
-                if let Err(e) = settings.merge(config::File::with_name(&config_file_name)) {
-                    panic!("Failed to load config file {}: {:?}", config_file_name, e);
-                }
+                settings_builder = settings_builder.add_source(config::File::new(
+                    config_file.to_str().unwrap(),
+                    config::FileFormat::Toml,
+                ));
             }
         }
     }
 
-    let db_path = settings.get_str(DB_FILE_CONFIG_KEY).unwrap();
-    let mpv_binary = settings.get_str(MPV_BINARY_CONFIG_KEY).unwrap();
+    let settings = settings_builder.build()?;
+
+    let db_path = settings.get_string(DB_FILE_CONFIG_KEY).unwrap();
+    let mpv_binary = settings.get_string(MPV_BINARY_CONFIG_KEY).unwrap();
+
+    let theme: Theme = settings.get_table(THEME_CONFIG_KEY)?.try_into()?;
 
     //let flags = OpenFlags::SQLITE_OPEN_FULL_MUTEX;
     //let conn = Connection::open_with_flags(db_path, flags).unwrap();
@@ -351,7 +457,7 @@ fn main() -> Result<(), Error> {
             refresh(&conn)?;
         }
         Options::Tui => {
-            tui::run(&conn, &mpv_binary)?;
+            tui::run(&conn, &mpv_binary, &theme)?;
         }
     }
     Ok(())

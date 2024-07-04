@@ -2,7 +2,7 @@ use crate::data::{
     add_to_active, add_to_available, iter_active, iter_available, remove_from_active,
     remove_from_available,
 };
-use crate::refresh;
+use crate::{refresh, Theme};
 use rusqlite::Connection;
 use signal_hook::iterator::Signals;
 use unsegen::base::{Color, GraphemeCluster, StyleModifier, Window};
@@ -92,16 +92,18 @@ impl TableRow for ActiveRow {
     ];
 }
 
-struct ActiveTable {
+struct ActiveTable<'t> {
     table: Table<ActiveRow>,
     deleted: Vec<Active>,
+    theme: &'t Theme,
 }
 
-impl ActiveTable {
-    fn with_active(active: impl Iterator<Item = Active>) -> Self {
+impl<'t> ActiveTable<'t> {
+    fn with_active(active: impl Iterator<Item = Active>, theme: &'t Theme) -> Self {
         let mut tui = ActiveTable {
             table: Table::new(),
             deleted: Vec::new(),
+            theme,
         };
         tui.update(active);
         tui
@@ -136,7 +138,7 @@ impl ActiveTable {
     }
 }
 
-impl Container<<Tui as ContainerProvider>::Context> for ActiveTable {
+impl Container<<Tui<'_> as ContainerProvider>::Context> for ActiveTable<'_> {
     fn input(
         &mut self,
         input: Input,
@@ -179,11 +181,22 @@ impl Container<<Tui as ContainerProvider>::Context> for ActiveTable {
             self.table
                 .as_widget()
                 .row_separation(SeparatingStyle::AlternatingStyle(
-                    StyleModifier::new().bg_color(Color::ansi_rgb(0, 0, 0)),
+                    StyleModifier::new()
+                        .bg_color(self.theme.alt_bg)
+                        .fg_color(self.theme.alt_fg),
                 ))
                 .col_separation(SeparatingStyle::Draw(
                     GraphemeCluster::try_from('|').unwrap(),
-                )),
+                ))
+                .with_window(move |mut w, _| {
+                    w.set_default_style(
+                        StyleModifier::new()
+                            .fg_color(self.theme.primary_fg)
+                            .bg_color(self.theme.primary_bg)
+                            .apply_to_default(),
+                    );
+                    w
+                }),
         )
     }
 }
@@ -228,16 +241,18 @@ impl TableRow for AvailableRow {
     ];
 }
 
-struct AvailableTable {
+struct AvailableTable<'t> {
     table: Table<AvailableRow>,
     deleted: Vec<Available>,
+    theme: &'t Theme,
 }
 
-impl AvailableTable {
-    fn with_available(available: impl Iterator<Item = Available>) -> Self {
+impl<'t> AvailableTable<'t> {
+    fn with_available(available: impl Iterator<Item = Available>, theme: &'t Theme) -> Self {
         let mut tui = AvailableTable {
             table: Table::new(),
             deleted: Vec::new(),
+            theme,
         };
         tui.update(available);
         tui
@@ -261,7 +276,7 @@ impl AvailableTable {
     }
 }
 
-impl Container<<Tui as ContainerProvider>::Context> for AvailableTable {
+impl Container<<Tui<'_> as ContainerProvider>::Context> for AvailableTable<'_> {
     fn input(
         &mut self,
         input: Input,
@@ -304,11 +319,22 @@ impl Container<<Tui as ContainerProvider>::Context> for AvailableTable {
             self.table
                 .as_widget()
                 .row_separation(SeparatingStyle::AlternatingStyle(
-                    StyleModifier::new().bg_color(Color::ansi_rgb(0, 0, 0)),
+                    StyleModifier::new()
+                        .bg_color(self.theme.alt_bg)
+                        .fg_color(self.theme.alt_fg),
                 ))
                 .col_separation(SeparatingStyle::Draw(
                     GraphemeCluster::try_from('|').unwrap(),
-                )),
+                ))
+                .with_window(move |mut w, _| {
+                    w.set_default_style(
+                        StyleModifier::new()
+                            .fg_color(self.theme.primary_fg)
+                            .bg_color(self.theme.primary_bg)
+                            .apply_to_default(),
+                    );
+                    w
+                }),
         )
     }
 }
@@ -325,18 +351,19 @@ enum TuiMsg {
     Refresh,
 }
 
-struct Tui {
-    active: ActiveTable,
-    available: AvailableTable,
+struct Tui<'t> {
+    active: ActiveTable<'t>,
+    available: AvailableTable<'t>,
 }
-impl Tui {
+impl Tui<'_> {
     fn update(&mut self, conn: &Connection) -> Result<(), rusqlite::Error> {
         self.available.update(iter_available(conn)?.into_iter());
         self.active.update(iter_active(conn)?.into_iter());
         Ok(())
     }
 }
-impl ContainerProvider for Tui {
+
+impl ContainerProvider for Tui<'_> {
     type Context = std::sync::mpsc::SyncSender<TuiMsg>;
     type Index = TuiComponents;
     fn get<'a, 'b: 'a>(&'b self, index: &'a Self::Index) -> &'b dyn Container<Self::Context> {
@@ -366,12 +393,12 @@ enum InputLoopMsg {
     Continue,
 }
 
-pub fn run(conn: &Connection, mpv_binary: &str) -> Result<(), rusqlite::Error> {
+pub fn run(conn: &Connection, mpv_binary: &str, theme: &Theme) -> Result<(), rusqlite::Error> {
     refresh(&conn)?;
 
     let mut tui = Tui {
-        active: ActiveTable::with_active(iter_active(&conn)?.into_iter()),
-        available: AvailableTable::with_available(iter_available(&conn)?.into_iter()),
+        active: ActiveTable::with_active(iter_active(&conn)?.into_iter(), theme),
+        available: AvailableTable::with_available(iter_available(&conn)?.into_iter(), theme),
     };
 
     if tui.available.table.rows().is_empty() && tui.active.table.rows().is_empty() {
