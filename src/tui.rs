@@ -11,7 +11,7 @@ use unsegen::input::ScrollBehavior;
 use unsegen::input::{Input, Key, NavigateBehavior};
 use unsegen::widget::{
     builtin::{Column, Table, TableRow},
-    ColDemand, Demand2D, RenderingHints, RowDemand, SeparatingStyle, Widget, WidgetExt,
+    ColDemand, Demand2D, RenderingHints, SeparatingStyle, Widget, WidgetExt,
 };
 
 use chrono::Duration;
@@ -34,18 +34,6 @@ fn format_duration(mut duration: Duration) -> String {
     duration = duration - Duration::seconds(seconds);
     let millis = duration.num_milliseconds();
     format!("{}{:>2}:{:02}.{:03}", prefix, minutes, seconds, millis)
-}
-
-struct Padding;
-impl Widget for Padding {
-    fn space_demand(&self) -> Demand2D {
-        Demand2D {
-            width: ColDemand::at_least(0),
-            height: RowDemand::exact(0),
-        }
-    }
-
-    fn draw(&self, _win: Window, _hints: RenderingHints) {}
 }
 
 fn highlight_active(mut window: Window, hints: RenderingHints) -> Window {
