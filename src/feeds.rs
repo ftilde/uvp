@@ -22,7 +22,6 @@ pub struct Entry {
     pub title: String,
     pub url: String,
     pub publication: crate::data::DateTime,
-    pub duration_secs: Option<f64>,
 }
 
 impl FeedEntries {
@@ -39,7 +38,6 @@ fn entry_from_atom(entry: &atom_syndication::Entry) -> Option<Entry> {
         title: entry.title().to_owned(),
         url: entry.links().first()?.href().to_owned(),
         publication: parse_time(entry.published()?).unwrap(),
-        duration_secs: None, //TODO
     })
 }
 fn entry_from_rss(entry: &rss::Item) -> Option<Entry> {
@@ -47,10 +45,6 @@ fn entry_from_rss(entry: &rss::Item) -> Option<Entry> {
         title: entry.title()?.to_owned(),
         url: entry.link()?.to_owned(),
         publication: parse_time(entry.pub_date()?).unwrap(),
-        duration_secs: entry
-            .itunes_ext()
-            .and_then(|ext| ext.duration())
-            .and_then(|s| str::parse::<f64>(s).ok()),
     })
 }
 
