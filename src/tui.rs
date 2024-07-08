@@ -192,7 +192,6 @@ impl Container<<Tui<'_> as ContainerProvider>::Context> for ActiveTable<'_> {
 struct AvailableRow {
     source: String,
     title: String,
-    duration: String,
     publication: String,
     data: Available,
 }
@@ -206,10 +205,6 @@ impl TableRow for AvailableRow {
         },
         Column {
             access: |r| Box::new(r.title.as_str().with_window(highlight_active)),
-            behavior: |_, i, _| Some(i),
-        },
-        Column {
-            access: |r| Box::new(r.duration.as_str().with_window(highlight_active)),
             behavior: |_, i, _| Some(i),
         },
         Column {
@@ -252,11 +247,6 @@ impl<'t> AvailableTable<'t> {
             rows.push(AvailableRow {
                 source: available.feed.title.clone(),
                 title: available.title.clone(),
-                duration: if let Some(t) = available.duration_secs {
-                    format_duration_secs(t)
-                } else {
-                    "".to_owned()
-                },
                 publication: available.publication.to_rfc3339(),
                 data: available,
             });

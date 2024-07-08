@@ -33,7 +33,6 @@ CREATE TABLE IF NOT EXISTS available (
     url            TEXT PRIMARY KEY,
     publication    TEXT NOT NULL,
     feedurl        TEXT NOT NULL,
-    duration_secs  FLOAT,
     FOREIGN KEY(feedurl) REFERENCES feed
 );
 "#;
@@ -42,7 +41,6 @@ pub struct Available {
     pub title: String,
     pub url: String,
     pub publication: DateTime,
-    pub duration_secs: Option<f64>,
     pub feed: Feed,
 }
 
@@ -110,7 +108,7 @@ pub fn remove_feed(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> 
 pub fn iter_available(conn: &Connection) -> Result<Vec<Available>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT available.title, url, publication, duration_secs, feedurl, feed.title, lastupdate
+        SELECT available.title, url, publication, feedurl, feed.title, lastupdate
         FROM available INNER JOIN feed USING(feedurl)
         ORDER BY publication DESC
         "#,
@@ -122,11 +120,10 @@ pub fn iter_available(conn: &Connection) -> Result<Vec<Available>, rusqlite::Err
                 title: row.get(0)?,
                 url: row.get(1)?,
                 publication: parse(&publication).unwrap(),
-                duration_secs: row.get(3)?,
                 feed: Feed {
-                    url: row.get(4)?,
-                    title: row.get(5)?,
-                    lastupdate: row.get(6).map(|lastupdate: Option<String>| {
+                    url: row.get(3)?,
+                    title: row.get(4)?,
+                    lastupdate: row.get(5).map(|lastupdate: Option<String>| {
                         lastupdate.map(|lastupdate| parse(&lastupdate).unwrap())
                     })?,
                 },
@@ -142,7 +139,7 @@ pub fn find_in_available(
 ) -> Result<Option<Available>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT available.title, url, publication, duration_secs, feedurl, feed.title, lastupdate
+        SELECT available.title, url, publication, feedurl, feed.title, lastupdate
         FROM available INNER JOIN feed USING(feedurl)
         WHERE url = ?1
         "#,
@@ -153,11 +150,10 @@ pub fn find_in_available(
             title: row.get(0)?,
             url: row.get(1)?,
             publication: parse(&publication).unwrap(),
-            duration_secs: row.get(3)?,
             feed: Feed {
-                url: row.get(4)?,
-                title: row.get(5)?,
-                lastupdate: row.get(6).map(|lastupdate: Option<String>| {
+                url: row.get(3)?,
+                title: row.get(4)?,
+                lastupdate: row.get(5).map(|lastupdate: Option<String>| {
                     lastupdate.map(|lastupdate| parse(&lastupdate).unwrap())
                 })?,
             },
@@ -278,7 +274,7 @@ pub fn make_active(conn: &Connection, url: &str) -> Result<(), rusqlite::Error> 
                 url: url.to_owned(),
                 title: Some(available.title),
                 position_secs: 0.0,
-                duration_secs: available.duration_secs,
+                duration_secs: None,
                 feed_title: Some(available.feed.title),
             },
         )?;

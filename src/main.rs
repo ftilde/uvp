@@ -425,15 +425,11 @@ fn main() -> Result<(), Error> {
                 }
             }
             List::Available => {
-                println!(
-                    "{} \t| {} \t| {} \t| {}",
-                    "Title", "Duration", "Publication", "Url"
-                );
+                println!("{} \t| {} \t| {}", "Title", "Publication", "Url");
                 for entry in iter_available(&conn)? {
                     println!(
-                        "{} \t| {:?} \t| {} \t| {}",
+                        "{} \t| {} \t| {}",
                         entry.title,
-                        entry.duration_secs,
                         entry.publication.to_rfc3339(),
                         entry.url,
                     );
