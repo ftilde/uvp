@@ -41,9 +41,14 @@ fn entry_from_atom(entry: &atom_syndication::Entry) -> Option<Entry> {
     })
 }
 fn entry_from_rss(entry: &rss::Item) -> Option<Entry> {
+    let url = entry
+        .enclosure()
+        .map(|ec| ec.url().to_owned())
+        .or(entry.link().map(|s| s.to_owned()))?;
+
     Some(Entry {
         title: entry.title()?.to_owned(),
-        url: entry.link()?.to_owned(),
+        url,
         publication: parse_time(entry.pub_date()?).unwrap(),
     })
 }
