@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::convert::From;
+
 use crate::data::{
     add_to_active, add_to_available, iter_active, iter_available, remove_from_active,
     remove_from_available,
@@ -5,12 +8,12 @@ use crate::data::{
 use crate::{refresh, Theme};
 use rusqlite::Connection;
 use signal_hook::iterator::Signals;
-use unsegen::base::{Color, GraphemeCluster, StyleModifier, Window};
+use unsegen::base::{Color, GraphemeCluster, RowIndex, StyleModifier, Window};
 use unsegen::container::{Container, ContainerManager, ContainerProvider, HSplit, Leaf};
-use unsegen::input::ScrollBehavior;
-use unsegen::input::{Input, Key, NavigateBehavior};
+use unsegen::input::{EditBehavior, Input, Key, NavigateBehavior};
+use unsegen::input::{ScrollBehavior, WriteBehavior};
 use unsegen::widget::{
-    builtin::{Column, Table, TableRow},
+    builtin::{Column, PromptLine, Table, TableRow},
     ColDemand, Demand2D, RenderingHints, SeparatingStyle, Widget, WidgetExt,
 };
 
@@ -327,17 +330,53 @@ enum TuiMsg {
     AddActive(Active),
     AddAvailable(Available),
     Refresh,
+    Redraw,
+}
+
+#[derive(PartialEq, Eq, Hash)]
+enum Mode {
+    Normal,
+    Filter,
 }
 
 struct Tui<'t> {
+    mode: Mode,
+    filter: Option<String>,
+    active_prompt: Option<PromptLine>,
+    mode_prompts: HashMap<Mode, PromptLine>,
     active: ActiveTable<'t>,
     available: AvailableTable<'t>,
 }
 impl Tui<'_> {
     fn update(&mut self, conn: &Connection) -> Result<(), rusqlite::Error> {
-        self.available.update(iter_available(conn)?.into_iter());
+        let filter = self.filter.as_ref();
+
+        self.available.update(
+            iter_available(conn)?.into_iter().filter(|r| {
+                filter.map_or(true, |f| r.feed.title.contains(f) || r.title.contains(f))
+            }),
+        );
         self.active.update(iter_active(conn)?.into_iter());
         Ok(())
+    }
+
+    fn switch_mode(&mut self, mode: Mode) {
+        match &self.mode {
+            Mode::Normal => {}
+            Mode::Filter => {
+                self.mode_prompts
+                    .insert(Mode::Filter, self.active_prompt.take().unwrap());
+            }
+        }
+
+        self.mode = mode;
+
+        match &self.mode {
+            Mode::Normal => {}
+            Mode::Filter => {
+                self.active_prompt = self.mode_prompts.remove(&Mode::Filter);
+            }
+        }
     }
 }
 
@@ -375,6 +414,14 @@ pub fn run(conn: &Connection, mpv_binary: &str, theme: &Theme) -> Result<(), rus
     refresh(&conn)?;
 
     let mut tui = Tui {
+        mode: Mode::Normal,
+        filter: None,
+        active_prompt: None,
+        mode_prompts: [(
+            Mode::Filter,
+            PromptLine::with_prompt("filter > ".to_string()),
+        )]
+        .into(),
         active: ActiveTable::with_active(iter_active(&conn)?.into_iter(), theme),
         available: AvailableTable::with_available(iter_available(&conn)?.into_iter(), theme),
     };
@@ -431,7 +478,22 @@ pub fn run(conn: &Connection, mpv_binary: &str, theme: &Theme) -> Result<(), rus
     let mut run = true;
     while run {
         {
-            let win = term.create_root_window();
+            let mut win = term.create_root_window();
+
+            if let Some(prompt_line) = &tui.active_prompt {
+                let main_height = win.get_height() - 1;
+                let (main, prompt) = win.split(RowIndex::new(main_height.into())).unwrap();
+                prompt_line
+                    .as_widget()
+                    .draw(prompt, RenderingHints::default());
+                win = main
+            } else if let Some(filter) = &tui.filter {
+                let main_height = win.get_height() - 1;
+                let (main, prompt) = win.split(RowIndex::new(main_height.into())).unwrap();
+                format!("Filter: {}", filter).draw(prompt, RenderingHints::default());
+                win = main
+            }
+
             manager.draw(
                 win,
                 &mut tui,
@@ -445,19 +507,48 @@ pub fn run(conn: &Connection, mpv_binary: &str, theme: &Theme) -> Result<(), rus
         if let Ok(msg) = tui_receiver.recv() {
             match msg {
                 Msg::Input(input) => {
-                    input
-                        .chain((Key::Char('q'), || run = false))
-                        .chain((Key::Char('r'), || {
-                            work_sender.send(TuiMsg::Refresh).unwrap()
-                        }))
-                        .chain(manager.active_container_behavior(&mut tui, &mut work_sender))
-                        .chain(
-                            NavigateBehavior::new(&mut manager.navigatable(&mut tui))
-                                .left_on(Key::Char('h'))
-                                .left_on(Key::Left)
-                                .right_on(Key::Char('l'))
-                                .right_on(Key::Right),
-                        );
+                    match tui.mode {
+                        Mode::Normal => {
+                            input
+                                .chain((Key::Char('q'), || run = false))
+                                .chain((Key::Char('r'), || {
+                                    work_sender.send(TuiMsg::Refresh).unwrap()
+                                }))
+                                .chain((Key::Char('f'), || tui.switch_mode(Mode::Filter)))
+                                .chain((Key::Esc, || {
+                                    tui.filter = None;
+                                    work_sender.send(TuiMsg::Redraw).unwrap();
+                                }))
+                                .chain(
+                                    manager.active_container_behavior(&mut tui, &mut work_sender),
+                                )
+                                .chain(
+                                    NavigateBehavior::new(&mut manager.navigatable(&mut tui))
+                                        .left_on(Key::Char('h'))
+                                        .left_on(Key::Left)
+                                        .right_on(Key::Char('l'))
+                                        .right_on(Key::Right),
+                                );
+                        }
+                        Mode::Filter => {
+                            input
+                                .chain(WriteBehavior::new(tui.active_prompt.as_mut().unwrap()))
+                                .chain(NavigateBehavior::new(tui.active_prompt.as_mut().unwrap()))
+                                .chain(EditBehavior::new(tui.active_prompt.as_mut().unwrap()))
+                                .chain((Key::Esc, || tui.switch_mode(Mode::Normal)))
+                                .chain((Key::Char('\n'), || {
+                                    tui.filter = Some(
+                                        tui.active_prompt
+                                            .as_mut()
+                                            .unwrap()
+                                            .finish_line()
+                                            .to_owned(),
+                                    );
+                                    tui.switch_mode(Mode::Normal);
+                                    work_sender.send(TuiMsg::Redraw).unwrap();
+                                }));
+                        }
+                    }
                     input_continue_msg = Some(InputLoopMsg::Continue);
                 }
                 Msg::Redraw => {}
@@ -472,6 +563,9 @@ pub fn run(conn: &Connection, mpv_binary: &str, theme: &Theme) -> Result<(), rus
                 }
                 TuiMsg::Refresh => {
                     refresh(conn)?;
+                    tui.update(conn)?;
+                }
+                TuiMsg::Redraw => {
                     tui.update(conn)?;
                 }
                 TuiMsg::Delete(url) => {
