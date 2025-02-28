@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::convert::From;
 
 use crate::data::{
     add_to_active, add_to_available, iter_active, iter_available, remove_from_active,
@@ -10,7 +9,7 @@ use rusqlite::Connection;
 use signal_hook::iterator::Signals;
 use unsegen::base::{Color, GraphemeCluster, RowIndex, StyleModifier, Window};
 use unsegen::container::{Container, ContainerManager, ContainerProvider, HSplit, Leaf};
-use unsegen::input::{EditBehavior, Input, Key, NavigateBehavior};
+use unsegen::input::{Behavior, EditBehavior, Input, Key, NavigateBehavior};
 use unsegen::input::{ScrollBehavior, WriteBehavior};
 use unsegen::widget::{
     builtin::{Column, PromptLine, Table, TableRow},
@@ -168,27 +167,31 @@ impl Container<<Tui<'_> as ContainerProvider>::Context> for ActiveTable<'_> {
     }
 
     fn as_widget<'a>(&'a self) -> Box<dyn Widget + 'a> {
-        Box::new(
-            self.table
-                .as_widget()
-                .row_separation(SeparatingStyle::AlternatingStyle(
-                    StyleModifier::new()
-                        .bg_color(self.theme.alt_bg)
-                        .fg_color(self.theme.alt_fg),
-                ))
-                .col_separation(SeparatingStyle::Draw(
-                    GraphemeCluster::try_from('|').unwrap(),
-                ))
-                .with_window(move |mut w, _| {
-                    w.set_default_style(
+        if self.table.current_row().is_none() {
+            Box::new("No active entries")
+        } else {
+            Box::new(
+                self.table
+                    .as_widget()
+                    .row_separation(SeparatingStyle::AlternatingStyle(
                         StyleModifier::new()
-                            .fg_color(self.theme.primary_fg)
-                            .bg_color(self.theme.primary_bg)
-                            .apply_to_default(),
-                    );
-                    w
-                }),
-        )
+                            .bg_color(self.theme.alt_bg)
+                            .fg_color(self.theme.alt_fg),
+                    ))
+                    .col_separation(SeparatingStyle::Draw(
+                        GraphemeCluster::try_from('|').unwrap(),
+                    ))
+                    .with_window(move |mut w, _| {
+                        w.set_default_style(
+                            StyleModifier::new()
+                                .fg_color(self.theme.primary_fg)
+                                .bg_color(self.theme.primary_bg)
+                                .apply_to_default(),
+                        );
+                        w
+                    }),
+            )
+        }
     }
 }
 
@@ -296,27 +299,31 @@ impl Container<<Tui<'_> as ContainerProvider>::Context> for AvailableTable<'_> {
     }
 
     fn as_widget<'a>(&'a self) -> Box<dyn Widget + 'a> {
-        Box::new(
-            self.table
-                .as_widget()
-                .row_separation(SeparatingStyle::AlternatingStyle(
-                    StyleModifier::new()
-                        .bg_color(self.theme.alt_bg)
-                        .fg_color(self.theme.alt_fg),
-                ))
-                .col_separation(SeparatingStyle::Draw(
-                    GraphemeCluster::try_from('|').unwrap(),
-                ))
-                .with_window(move |mut w, _| {
-                    w.set_default_style(
+        if self.table.current_row().is_none() {
+            Box::new("No available entries")
+        } else {
+            Box::new(
+                self.table
+                    .as_widget()
+                    .row_separation(SeparatingStyle::AlternatingStyle(
                         StyleModifier::new()
-                            .fg_color(self.theme.primary_fg)
-                            .bg_color(self.theme.primary_bg)
-                            .apply_to_default(),
-                    );
-                    w
-                }),
-        )
+                            .bg_color(self.theme.alt_bg)
+                            .fg_color(self.theme.alt_fg),
+                    ))
+                    .col_separation(SeparatingStyle::Draw(
+                        GraphemeCluster::try_from('|').unwrap(),
+                    ))
+                    .with_window(move |mut w, _| {
+                        w.set_default_style(
+                            StyleModifier::new()
+                                .fg_color(self.theme.primary_fg)
+                                .bg_color(self.theme.primary_bg)
+                                .apply_to_default(),
+                        );
+                        w
+                    }),
+            )
+        }
     }
 }
 
@@ -333,10 +340,55 @@ enum TuiMsg {
     Redraw,
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Mode {
     Normal,
     Filter,
+}
+
+struct FilterPromptBehavior<'b, 't> {
+    tui: &'b mut Tui<'t>,
+    work_sender: &'b mut std::sync::mpsc::SyncSender<TuiMsg>,
+}
+
+impl<'b, 't> FilterPromptBehavior<'b, 't> {
+    fn new(tui: &'b mut Tui<'t>, work_sender: &'b mut std::sync::mpsc::SyncSender<TuiMsg>) -> Self {
+        FilterPromptBehavior { tui, work_sender }
+    }
+}
+
+impl Behavior for FilterPromptBehavior<'_, '_> {
+    fn input(self, input: Input) -> Option<Input> {
+        let prompt = self.tui.active_prompt.as_mut().unwrap();
+
+        input
+            .chain(
+                EditBehavior::new(prompt)
+                    .delete_backwards_on(Key::Backspace)
+                    .delete_forwards_on(Key::Delete)
+                    .go_to_beginning_of_line_on(Key::Home)
+                    .go_to_end_of_line_on(Key::End)
+                    .right_on(Key::Right)
+                    .left_on(Key::Left)
+                    .up_on(Key::Up)
+                    .down_on(Key::Down),
+            )
+            .chain(WriteBehavior::new(prompt))
+            .chain((Key::Esc, || self.tui.switch_mode(Mode::Normal)))
+            .chain((Key::Char('\n'), || {
+                self.tui.filter = Some(
+                    self.tui
+                        .active_prompt
+                        .as_mut()
+                        .unwrap()
+                        .finish_line()
+                        .to_owned(),
+                );
+                self.tui.switch_mode(Mode::Normal);
+                self.work_sender.send(TuiMsg::Redraw).unwrap();
+            }))
+            .finish()
+    }
 }
 
 struct Tui<'t> {
@@ -356,7 +408,16 @@ impl Tui<'_> {
                 filter.map_or(true, |f| r.feed.title.contains(f) || r.title.contains(f))
             }),
         );
-        self.active.update(iter_active(conn)?.into_iter());
+        self.active
+            .update(iter_active(conn)?.into_iter().filter(|r| {
+                filter.map_or(true, |f| {
+                    r.title.as_ref().map(|t| t.contains(f)).unwrap_or(false)
+                        || r.feed_title
+                            .as_ref()
+                            .map(|ft| ft.contains(f))
+                            .unwrap_or(false)
+                })
+            }));
         Ok(())
     }
 
@@ -531,22 +592,7 @@ pub fn run(conn: &Connection, mpv_binary: &str, theme: &Theme) -> Result<(), rus
                                 );
                         }
                         Mode::Filter => {
-                            input
-                                .chain(WriteBehavior::new(tui.active_prompt.as_mut().unwrap()))
-                                .chain(NavigateBehavior::new(tui.active_prompt.as_mut().unwrap()))
-                                .chain(EditBehavior::new(tui.active_prompt.as_mut().unwrap()))
-                                .chain((Key::Esc, || tui.switch_mode(Mode::Normal)))
-                                .chain((Key::Char('\n'), || {
-                                    tui.filter = Some(
-                                        tui.active_prompt
-                                            .as_mut()
-                                            .unwrap()
-                                            .finish_line()
-                                            .to_owned(),
-                                    );
-                                    tui.switch_mode(Mode::Normal);
-                                    work_sender.send(TuiMsg::Redraw).unwrap();
-                                }));
+                            input.chain(FilterPromptBehavior::new(&mut tui, &mut work_sender));
                         }
                     }
                     input_continue_msg = Some(InputLoopMsg::Continue);
