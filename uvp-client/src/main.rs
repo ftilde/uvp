@@ -5,7 +5,7 @@ use std::{
 };
 use structopt::StructOpt;
 use unsegen::base::Color;
-use uvp_state::data::Feed;
+use uvp_state::data::{Feed, Store};
 
 mod mpv;
 mod tui;
@@ -261,13 +261,14 @@ fn main() -> Result<(), Error> {
     //let flags = OpenFlags::SQLITE_OPEN_FULL_MUTEX;
     //let conn = Connection::open_with_flags(db_path, flags).unwrap();
     let db = uvp_state::data::Database::new(Path::new(&db_path)).unwrap();
+    let store: Box<dyn Store> = Box::new(db);
 
     match Options::from_args() {
         Options::Add(Add::Video(vid)) => {
-            db.make_active(&vid.url)?;
+            store.make_active(&vid.url)?;
         }
         Options::Play(p) => {
-            mpv::play(&db, &p.url, &mpv_binary)?;
+            mpv::play(&*store, &p.url, &mpv_binary)?;
         }
         Options::Add(Add::Feed(add)) => {
             let feed = match add {
@@ -308,12 +309,12 @@ fn main() -> Result<(), Error> {
                     lastupdate: None,
                 },
             };
-            db.add_to_feed(&feed)?;
+            store.add_to_feed(&feed)?;
         }
         Options::List(what) => match what {
             List::Feeds => {
                 println!("{} \t| {} \t| {}", "Title", "Last Update", "Url");
-                for feed in db.iter_feeds()? {
+                for feed in store.iter_feeds()? {
                     println!(
                         "{} \t| {} \t| {}",
                         feed.title,
@@ -326,7 +327,7 @@ fn main() -> Result<(), Error> {
             }
             List::Available => {
                 println!("{} \t| {} \t| {}", "Title", "Publication", "Url");
-                for entry in db.all_available()? {
+                for entry in store.all_available()? {
                     println!(
                         "{} \t| {} \t| {}",
                         entry.title,
@@ -337,23 +338,23 @@ fn main() -> Result<(), Error> {
             }
             List::Active => {
                 println!("{} \t| {} \t| {}", "Title", "Url", "Playback");
-                for entry in db.iter_active()? {
+                for entry in store.iter_active()? {
                     let title = entry.title.unwrap_or("Unknown".to_string());
                     println!("{} \t| {} \t {}", title, entry.url, entry.position_secs);
                 }
             }
         },
         Options::Remove(Remove::Video { url }) => {
-            db.remove_from_available(&url)?;
+            store.remove_from_available(&url)?;
         }
         Options::Remove(Remove::Feed { url }) => {
-            db.remove_feed(&url)?;
+            store.remove_feed(&url)?;
         }
         Options::Refresh => {
-            db.refresh()?;
+            store.refresh()?;
         }
         Options::Tui => {
-            tui::run(&db, &mpv_binary, &theme)?;
+            tui::run(&*store, &mpv_binary, &theme)?;
         }
     }
     Ok(())

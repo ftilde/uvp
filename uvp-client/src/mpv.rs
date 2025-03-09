@@ -1,10 +1,10 @@
-use uvp_state::data::{ignore_constraint_errors, Database};
+use uvp_state::data::{ignore_constraint_errors, Store};
 
 const END_DETECTION_TOLERANCE_SECONDS: f64 = 1.0;
 
-pub fn play(db: &Database, url: &str, mpv_binary: &str) -> Result<(), crate::Error> {
-    ignore_constraint_errors(db.make_active(url))?;
-    let active = db.find_in_active(url)?.unwrap();
+pub fn play(store: &dyn Store, url: &str, mpv_binary: &str) -> Result<(), crate::Error> {
+    ignore_constraint_errors(store.make_active(url))?;
+    let active = store.find_in_active(url)?.unwrap();
 
     let tmp_dir = tempfile::tempdir().unwrap();
 
@@ -57,17 +57,17 @@ pub fn play(db: &Database, url: &str, mpv_binary: &str) -> Result<(), crate::Err
         && playback_time.is_some()
         && playback_time.unwrap() >= duration_secs.unwrap() - END_DETECTION_TOLERANCE_SECONDS
     {
-        db.remove_from_active(&active.url)?;
+        store.remove_from_active(&active.url)?;
     } else {
         if let Some(t) = playback_time {
-            db.set_position_secs(&active.url, t)?;
+            store.set_position_secs(&active.url, t)?;
         }
         if let Some(d) = duration_secs {
-            db.set_duration(&active.url, d)?;
+            store.set_duration(&active.url, d)?;
         }
     }
     if let (Some(new_title), None) = (title, active.title) {
-        db.set_title(&active.url, &new_title)?;
+        store.set_title(&active.url, &new_title)?;
     }
     output.wait().unwrap();
     Ok(())

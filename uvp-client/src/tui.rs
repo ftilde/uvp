@@ -12,7 +12,7 @@ use unsegen::widget::{
 };
 
 use chrono::Duration;
-use uvp_state::data::{Active, Available, Database};
+use uvp_state::data::{Active, Available, Store};
 
 fn format_duration_secs(duration: f64) -> String {
     format_duration(Duration::milliseconds((duration * 1_000.0) as i64))
@@ -394,7 +394,7 @@ struct Tui<'t> {
     available: AvailableTable<'t>,
 }
 impl Tui<'_> {
-    fn update(&mut self, db: &Database) -> Result<(), uvp_state::Error> {
+    fn update(&mut self, db: &dyn Store) -> Result<(), uvp_state::Error> {
         let filter = self.filter.as_ref();
 
         self.available.update(
@@ -465,8 +465,8 @@ enum InputLoopMsg {
     Continue,
 }
 
-pub fn run(db: &Database, mpv_binary: &str, theme: &Theme) -> Result<(), crate::Error> {
-    db.refresh()?;
+pub fn run(store: &dyn Store, mpv_binary: &str, theme: &Theme) -> Result<(), crate::Error> {
+    store.refresh()?;
 
     let mut tui = Tui {
         mode: Mode::Normal,
@@ -477,8 +477,8 @@ pub fn run(db: &Database, mpv_binary: &str, theme: &Theme) -> Result<(), crate::
             PromptLine::with_prompt("filter > ".to_string()),
         )]
         .into(),
-        active: ActiveTable::with_active(db.iter_active()?.into_iter(), theme),
-        available: AvailableTable::with_available(db.all_available()?.into_iter(), theme),
+        active: ActiveTable::with_active(store.iter_active()?.into_iter(), theme),
+        available: AvailableTable::with_available(store.all_available()?.into_iter(), theme),
     };
 
     if tui.available.table.rows().is_empty() && tui.active.table.rows().is_empty() {
@@ -597,29 +597,29 @@ pub fn run(db: &Database, mpv_binary: &str, theme: &Theme) -> Result<(), crate::
         if let Ok(msg) = work_receiver.try_recv() {
             match msg {
                 TuiMsg::Play(url) => {
-                    term.on_main_screen(|| crate::mpv::play(db, &url, mpv_binary))
+                    term.on_main_screen(|| crate::mpv::play(store, &url, mpv_binary))
                         .unwrap()?;
-                    tui.update(db)?;
+                    tui.update(store)?;
                 }
                 TuiMsg::Refresh => {
-                    db.refresh()?;
-                    tui.update(db)?;
+                    store.refresh()?;
+                    tui.update(store)?;
                 }
                 TuiMsg::Redraw => {
-                    tui.update(db)?;
+                    tui.update(store)?;
                 }
                 TuiMsg::Delete(url) => {
-                    db.remove_from_active(&url)?;
-                    db.remove_from_available(&url)?;
-                    tui.update(db)?;
+                    store.remove_from_active(&url)?;
+                    store.remove_from_available(&url)?;
+                    tui.update(store)?;
                 }
                 TuiMsg::AddAvailable(a) => {
-                    db.add_to_available(&a)?;
-                    tui.update(db)?;
+                    store.add_to_available(&a)?;
+                    tui.update(store)?;
                 }
                 TuiMsg::AddActive(a) => {
-                    db.add_to_active(&a)?;
-                    tui.update(db)?;
+                    store.add_to_active(&a)?;
+                    tui.update(store)?;
                 }
             }
         }

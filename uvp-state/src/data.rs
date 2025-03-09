@@ -87,10 +87,8 @@ const TABLE_DEFINITIONS: &[&str] = &[
     TABLE_DEFINITION_ACTIVE,
 ];
 
-/// Feed -----------------------------------------------------------------------
-
-impl Database {
-    pub fn iter_feeds(&self) -> Result<Vec<Feed>, crate::Error> {
+impl Store for Database {
+    fn iter_feeds(&self) -> Result<Vec<Feed>, crate::Error> {
         let mut stmt = self.connection.prepare(
             r#"
         SELECT feedurl, title, lastupdate FROM feed
@@ -109,7 +107,7 @@ impl Database {
             .collect::<Result<Vec<_>, rusqlite::Error>>()?;
         Ok(res)
     }
-    pub fn add_to_feed(&self, feed: &Feed) -> Result<(), crate::Error> {
+    fn add_to_feed(&self, feed: &Feed) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
         INSERT INTO feed (title, feedurl) VALUES (?1, ?2)
@@ -118,7 +116,7 @@ impl Database {
         )?;
         Ok(())
     }
-    pub fn remove_feed(&self, url: &str) -> Result<(), crate::Error> {
+    fn remove_feed(&self, url: &str) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
         DELETE FROM feed WHERE feedurl = ?1
@@ -127,11 +125,8 @@ impl Database {
         )?;
         Ok(())
     }
-}
 
-/// Available ------------------------------------------------------------------
-impl Database {
-    pub fn all_available(&self) -> Result<Vec<Available>, crate::Error> {
+    fn all_available(&self) -> Result<Vec<Available>, crate::Error> {
         let mut stmt = self.connection.prepare(
             r#"
         SELECT available.title, url, publication, feedurl, feed.title, lastupdate
@@ -159,7 +154,7 @@ impl Database {
         Ok(res)
     }
 
-    pub fn find_in_available(&self, url: &str) -> Result<Option<Available>, crate::Error> {
+    fn find_in_available(&self, url: &str) -> Result<Option<Available>, crate::Error> {
         let mut stmt = self.connection.prepare(
             r#"
         SELECT available.title, url, publication, feedurl, feed.title, lastupdate
@@ -186,7 +181,7 @@ impl Database {
         Ok(iter.next().transpose()?)
     }
 
-    pub fn remove_from_available(&self, url: &str) -> Result<(), crate::Error> {
+    fn remove_from_available(&self, url: &str) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
         DELETE FROM available WHERE url = ?1
@@ -196,7 +191,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn add_to_available(&self, available: &Available) -> Result<(), crate::Error> {
+    fn add_to_available(&self, available: &Available) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
         INSERT INTO available (title, url, feedurl, publication) VALUES (?1, ?2, ?3, ?4)
@@ -211,7 +206,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn set_last_update(&self, url: &str, update: DateTime) -> Result<(), crate::Error> {
+    fn set_last_update(&self, url: &str, update: DateTime) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
                 UPDATE feed SET lastupdate = ?1 WHERE feedurl = ?2
@@ -220,11 +215,8 @@ impl Database {
         )?;
         Ok(())
     }
-}
 
-/// Active ---------------------------------------------------------------------
-impl Database {
-    pub fn iter_active(&self) -> Result<Vec<Active>, crate::Error> {
+    fn iter_active(&self) -> Result<Vec<Active>, crate::Error> {
         let mut stmt = self.connection.prepare(
             r#"
         SELECT title, url, position_secs, duration_secs, feed_title
@@ -245,7 +237,7 @@ impl Database {
         Ok(res)
     }
 
-    pub fn find_in_active(&self, url: &str) -> Result<Option<Active>, crate::Error> {
+    fn find_in_active(&self, url: &str) -> Result<Option<Active>, crate::Error> {
         let mut stmt = self.connection.prepare(
             r#"
         SELECT title, url, position_secs, duration_secs, feed_title
@@ -266,7 +258,7 @@ impl Database {
         Ok(iter.next().transpose()?)
     }
 
-    pub fn add_to_active(&self, active: &Active) -> Result<(), crate::Error> {
+    fn add_to_active(&self, active: &Active) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
         INSERT INTO active (url, title, position_secs, feed_title) VALUES (?1, ?2, ?3, ?4)
@@ -281,7 +273,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn make_active(&self, url: &str) -> Result<(), crate::Error> {
+    fn make_active(&self, url: &str) -> Result<(), crate::Error> {
         if let Some(available) = self.find_in_available(url)? {
             self.add_to_active(&Active {
                 url: url.to_owned(),
@@ -301,7 +293,7 @@ impl Database {
             })
         }
     }
-    pub fn set_position_secs(&self, url: &str, position_secs: f64) -> Result<(), crate::Error> {
+    fn set_position_secs(&self, url: &str, position_secs: f64) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
         UPDATE active SET position_secs = ?1 WHERE url = ?2
@@ -310,7 +302,7 @@ impl Database {
         )?;
         Ok(())
     }
-    pub fn set_duration(&self, url: &str, duration_secs: f64) -> Result<(), crate::Error> {
+    fn set_duration(&self, url: &str, duration_secs: f64) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
         UPDATE active SET duration_secs = ?1 WHERE url = ?2
@@ -319,7 +311,7 @@ impl Database {
         )?;
         Ok(())
     }
-    pub fn set_title(&self, url: &str, title: &str) -> Result<(), crate::Error> {
+    fn set_title(&self, url: &str, title: &str) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
         UPDATE active SET title = ?1 WHERE url = ?2
@@ -328,7 +320,7 @@ impl Database {
         )?;
         Ok(())
     }
-    pub fn remove_from_active(&self, url: &str) -> Result<(), crate::Error> {
+    fn remove_from_active(&self, url: &str) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
         DELETE FROM active WHERE url = ?1
@@ -337,8 +329,29 @@ impl Database {
         )?;
         Ok(())
     }
+}
 
-    pub fn refresh(&self) -> Result<(), crate::Error> {
+pub trait Store {
+    fn iter_feeds(&self) -> Result<Vec<Feed>, crate::Error>;
+    fn add_to_feed(&self, feed: &Feed) -> Result<(), crate::Error>;
+    fn remove_feed(&self, url: &str) -> Result<(), crate::Error>;
+
+    fn all_available(&self) -> Result<Vec<Available>, crate::Error>;
+    fn find_in_available(&self, url: &str) -> Result<Option<Available>, crate::Error>;
+    fn remove_from_available(&self, url: &str) -> Result<(), crate::Error>;
+    fn add_to_available(&self, available: &Available) -> Result<(), crate::Error>;
+    fn set_last_update(&self, url: &str, update: DateTime) -> Result<(), crate::Error>;
+
+    fn iter_active(&self) -> Result<Vec<Active>, crate::Error>;
+    fn find_in_active(&self, url: &str) -> Result<Option<Active>, crate::Error>;
+    fn add_to_active(&self, active: &Active) -> Result<(), crate::Error>;
+    fn make_active(&self, url: &str) -> Result<(), crate::Error>;
+    fn set_position_secs(&self, url: &str, position_secs: f64) -> Result<(), crate::Error>;
+    fn set_duration(&self, url: &str, duration_secs: f64) -> Result<(), crate::Error>;
+    fn set_title(&self, url: &str, title: &str) -> Result<(), crate::Error>;
+    fn remove_from_active(&self, url: &str) -> Result<(), crate::Error>;
+
+    fn refresh(&self) -> Result<(), crate::Error> {
         let client = reqwest::ClientBuilder::new()
             .timeout(FETCH_TIMEOUT)
             .build()
