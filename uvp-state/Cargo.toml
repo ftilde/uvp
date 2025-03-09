@@ -1,0 +1,15 @@
+[package]
+name = "uvp-state"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rusqlite = "0.21"
+chrono = { version = "0.4", features=["serde"] }
+rss = "1.7"
+atom_syndication = "0.6"
+reqwest = "0.10"
+serde = { version = "1.0.217", features=["derive"] }
+futures-util = "0.3.1"
+tokio = { version = "0.2.6", features = ["rt-core", "time"] }
+

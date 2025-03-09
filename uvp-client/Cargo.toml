@@ -1,0 +1,26 @@
+[package]
+name = "uvp"
+version = "0.1.0"
+authors = ["ftilde <ftilde@tamepointer.de>"]
+description = "A video-focused cmdline/tui podcatcher"
+repository = "https://github.com/ftilde/uvp"
+readme = "README.md"
+license = "MIT"
+edition = "2018"
+
+[dependencies]
+structopt = "0.3"
+dirs = "2"
+chrono = "0.4"
+mpvipc = "1.1.8"
+tempfile = "3.1"
+signal-hook = "0.1"
+unsegen = "0.3.0"
+config = { version = "0.14", default-features = false, features = ["toml"] }
+tokio = { version = "0.2.6", features = ["rt-core", "time"] }
+uvp-state = { path = "../uvp-state" }
+
+# Use one of these for development of new features of unsegen
+#[patch.crates-io]
+#unsegen = { git = 'https://github.com/ftilde/unsegen' }
+#unsegen = { path = "../unsegen" }

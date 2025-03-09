@@ -1,7 +1,3 @@
-use atom_syndication;
-use reqwest;
-use rss;
-use rusqlite::{params, Connection};
 use std::{
     convert::{TryFrom, TryInto},
     iter::FromIterator,
@@ -9,21 +5,16 @@ use std::{
 };
 use structopt::StructOpt;
 use unsegen::base::Color;
+use uvp_state::data::Feed;
 
-mod data;
-mod feeds;
 mod mpv;
 mod tui;
-
-use data::*;
-use feeds::fetch;
 
 const DB_NAME: &'static str = "uvp.db";
 const CONFIG_FILE_NAME: &'static str = "uvp.toml";
 const DB_FILE_CONFIG_KEY: &'static str = "database_file";
 const MPV_BINARY_CONFIG_KEY: &'static str = "mpv_binary";
 const THEME_CONFIG_KEY: &'static str = "theme";
-const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 #[derive(StructOpt)]
 enum Add {
@@ -124,44 +115,15 @@ fn mediathek_url(channel: &str) -> String {
     format!("https://mediathekviewweb.de/feed?query={}", channel)
 }
 
-fn ignore_constraint_errors(res: Result<(), rusqlite::Error>) -> Result<(), rusqlite::Error> {
-    match res {
-        Err(rusqlite::Error::SqliteFailure(error, _))
-            if error.code == rusqlite::ErrorCode::ConstraintViolation =>
-        {
-            Ok(())
-        }
-        o => o,
-    }
-}
-
 #[derive(Debug)]
 pub enum Error {
-    Reqwest(reqwest::Error),
-    RSS(rss::Error),
-    Atom(atom_syndication::Error),
-    DB(rusqlite::Error),
+    State(uvp_state::Error),
     Config(config::ConfigError),
 }
 
-impl From<reqwest::Error> for Error {
-    fn from(error: reqwest::Error) -> Self {
-        Error::Reqwest(error)
-    }
-}
-impl From<rss::Error> for Error {
-    fn from(error: rss::Error) -> Self {
-        Error::RSS(error)
-    }
-}
-impl From<atom_syndication::Error> for Error {
-    fn from(error: atom_syndication::Error) -> Self {
-        Error::Atom(error)
-    }
-}
-impl From<rusqlite::Error> for Error {
-    fn from(error: rusqlite::Error) -> Self {
-        Error::DB(error)
+impl From<uvp_state::Error> for Error {
+    fn from(value: uvp_state::Error) -> Self {
+        Self::State(value)
     }
 }
 impl From<config::ConfigError> for Error {
@@ -174,66 +136,6 @@ impl From<std::num::ParseIntError> for Error {
     fn from(value: std::num::ParseIntError) -> Self {
         Error::Config(config::ConfigError::Foreign(Box::new(value)))
     }
-}
-
-fn refresh(conn: &Connection) -> Result<(), rusqlite::Error> {
-    let client = reqwest::ClientBuilder::new()
-        .timeout(FETCH_TIMEOUT)
-        .build()
-        .unwrap();
-    let fetches =
-        futures_util::future::join_all(iter_feeds(&conn)?.into_iter().map(|feed| async {
-            let fetch_result = fetch(&client, &feed.url).await;
-            (fetch_result, feed)
-        }));
-    let mut rt = tokio::runtime::Builder::new()
-        .basic_scheduler()
-        .enable_io()
-        .enable_time()
-        .build()
-        .unwrap();
-    let fetched_feeds = rt.block_on(fetches);
-    for (fetch_result, feed) in fetched_feeds {
-        let mut lastpublication = feed.lastupdate;
-
-        let fetched_feed = match fetch_result {
-            Ok(feed) => feed,
-            Err(Error::Reqwest(e)) => {
-                eprintln!("Failed to fetch feed {}: {}", feed.title, e);
-                continue;
-            }
-            Err(Error::RSS(e)) => {
-                eprintln!("Failed to parse feed {}: {}", feed.title, e);
-                continue;
-            }
-            Err(Error::Atom(e)) => {
-                eprintln!("Failed to parse feed {}: {}", feed.title, e);
-                continue;
-            }
-            Err(e) => {
-                panic!("Unexpected error during fetch: {:?}", e);
-            }
-        };
-        for entry in fetched_feed.entries() {
-            if feed.lastupdate.is_none() || feed.lastupdate.unwrap() < entry.publication {
-                ignore_constraint_errors(add_entry_to_available(&conn, feed.url.clone(), &entry))?;
-            }
-            lastpublication = if let Some(lastpublication) = lastpublication {
-                Some(entry.publication.max(lastpublication))
-            } else {
-                Some(entry.publication)
-            }
-        }
-        if let Some(lastpublication) = lastpublication {
-            conn.execute(
-                r#"
-                UPDATE feed SET lastupdate = ?1 WHERE feedurl = ?2
-                "#,
-                params!(lastpublication.to_rfc3339(), feed.url),
-            )?;
-        }
-    }
-    Ok(())
 }
 
 struct Theme {
@@ -358,16 +260,14 @@ fn main() -> Result<(), Error> {
 
     //let flags = OpenFlags::SQLITE_OPEN_FULL_MUTEX;
     //let conn = Connection::open_with_flags(db_path, flags).unwrap();
-    let conn = Connection::open(Path::new(&db_path))?;
-    for def in TABLE_DEFINITIONS {
-        conn.execute(def, params![])?;
-    }
+    let db = uvp_state::data::Database::new(Path::new(&db_path)).unwrap();
+
     match Options::from_args() {
         Options::Add(Add::Video(vid)) => {
-            make_active(&conn, &vid.url)?;
+            db.make_active(&vid.url)?;
         }
         Options::Play(p) => {
-            mpv::play(&conn, &p.url, &mpv_binary)?;
+            mpv::play(&db, &p.url, &mpv_binary)?;
         }
         Options::Add(Add::Feed(add)) => {
             let feed = match add {
@@ -408,12 +308,12 @@ fn main() -> Result<(), Error> {
                     lastupdate: None,
                 },
             };
-            add_to_feed(&conn, &feed)?;
+            db.add_to_feed(&feed)?;
         }
         Options::List(what) => match what {
             List::Feeds => {
                 println!("{} \t| {} \t| {}", "Title", "Last Update", "Url");
-                for feed in iter_feeds(&conn)? {
+                for feed in db.iter_feeds()? {
                     println!(
                         "{} \t| {} \t| {}",
                         feed.title,
@@ -426,7 +326,7 @@ fn main() -> Result<(), Error> {
             }
             List::Available => {
                 println!("{} \t| {} \t| {}", "Title", "Publication", "Url");
-                for entry in iter_available(&conn)? {
+                for entry in db.all_available()? {
                     println!(
                         "{} \t| {} \t| {}",
                         entry.title,
@@ -437,23 +337,23 @@ fn main() -> Result<(), Error> {
             }
             List::Active => {
                 println!("{} \t| {} \t| {}", "Title", "Url", "Playback");
-                for entry in iter_active(&conn)? {
+                for entry in db.iter_active()? {
                     let title = entry.title.unwrap_or("Unknown".to_string());
                     println!("{} \t| {} \t {}", title, entry.url, entry.position_secs);
                 }
             }
         },
         Options::Remove(Remove::Video { url }) => {
-            remove_from_available(&conn, &url)?;
+            db.remove_from_available(&url)?;
         }
         Options::Remove(Remove::Feed { url }) => {
-            remove_feed(&conn, &url)?;
+            db.remove_feed(&url)?;
         }
         Options::Refresh => {
-            refresh(&conn)?;
+            db.refresh()?;
         }
         Options::Tui => {
-            tui::run(&conn, &mpv_binary, &theme)?;
+            tui::run(&db, &mpv_binary, &theme)?;
         }
     }
     Ok(())

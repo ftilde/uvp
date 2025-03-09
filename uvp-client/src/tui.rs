@@ -1,11 +1,6 @@
 use std::collections::HashMap;
 
-use crate::data::{
-    add_to_active, add_to_available, iter_active, iter_available, remove_from_active,
-    remove_from_available,
-};
-use crate::{refresh, Theme};
-use rusqlite::Connection;
+use crate::Theme;
 use signal_hook::iterator::Signals;
 use unsegen::base::{Color, GraphemeCluster, RowIndex, StyleModifier, Window};
 use unsegen::container::{Container, ContainerManager, ContainerProvider, HSplit, Leaf};
@@ -17,8 +12,7 @@ use unsegen::widget::{
 };
 
 use chrono::Duration;
-
-use crate::data::{Active, Available};
+use uvp_state::data::{Active, Available, Database};
 
 fn format_duration_secs(duration: f64) -> String {
     format_duration(Duration::milliseconds((duration * 1_000.0) as i64))
@@ -400,16 +394,16 @@ struct Tui<'t> {
     available: AvailableTable<'t>,
 }
 impl Tui<'_> {
-    fn update(&mut self, conn: &Connection) -> Result<(), rusqlite::Error> {
+    fn update(&mut self, db: &Database) -> Result<(), uvp_state::Error> {
         let filter = self.filter.as_ref();
 
         self.available.update(
-            iter_available(conn)?.into_iter().filter(|r| {
+            db.all_available()?.into_iter().filter(|r| {
                 filter.map_or(true, |f| r.feed.title.contains(f) || r.title.contains(f))
             }),
         );
         self.active
-            .update(iter_active(conn)?.into_iter().filter(|r| {
+            .update(db.iter_active()?.into_iter().filter(|r| {
                 filter.map_or(true, |f| {
                     r.title.as_ref().map(|t| t.contains(f)).unwrap_or(false)
                         || r.feed_title
@@ -471,8 +465,8 @@ enum InputLoopMsg {
     Continue,
 }
 
-pub fn run(conn: &Connection, mpv_binary: &str, theme: &Theme) -> Result<(), rusqlite::Error> {
-    refresh(&conn)?;
+pub fn run(db: &Database, mpv_binary: &str, theme: &Theme) -> Result<(), crate::Error> {
+    db.refresh()?;
 
     let mut tui = Tui {
         mode: Mode::Normal,
@@ -483,8 +477,8 @@ pub fn run(conn: &Connection, mpv_binary: &str, theme: &Theme) -> Result<(), rus
             PromptLine::with_prompt("filter > ".to_string()),
         )]
         .into(),
-        active: ActiveTable::with_active(iter_active(&conn)?.into_iter(), theme),
-        available: AvailableTable::with_available(iter_available(&conn)?.into_iter(), theme),
+        active: ActiveTable::with_active(db.iter_active()?.into_iter(), theme),
+        available: AvailableTable::with_available(db.all_available()?.into_iter(), theme),
     };
 
     if tui.available.table.rows().is_empty() && tui.active.table.rows().is_empty() {
@@ -603,29 +597,29 @@ pub fn run(conn: &Connection, mpv_binary: &str, theme: &Theme) -> Result<(), rus
         if let Ok(msg) = work_receiver.try_recv() {
             match msg {
                 TuiMsg::Play(url) => {
-                    term.on_main_screen(|| crate::mpv::play(conn, &url, mpv_binary))
+                    term.on_main_screen(|| crate::mpv::play(db, &url, mpv_binary))
                         .unwrap()?;
-                    tui.update(conn)?;
+                    tui.update(db)?;
                 }
                 TuiMsg::Refresh => {
-                    refresh(conn)?;
-                    tui.update(conn)?;
+                    db.refresh()?;
+                    tui.update(db)?;
                 }
                 TuiMsg::Redraw => {
-                    tui.update(conn)?;
+                    tui.update(db)?;
                 }
                 TuiMsg::Delete(url) => {
-                    remove_from_active(conn, &url)?;
-                    remove_from_available(conn, &url)?;
-                    tui.update(conn)?;
+                    db.remove_from_active(&url)?;
+                    db.remove_from_available(&url)?;
+                    tui.update(db)?;
                 }
                 TuiMsg::AddAvailable(a) => {
-                    add_to_available(conn, &a)?;
-                    tui.update(conn)?;
+                    db.add_to_available(&a)?;
+                    tui.update(db)?;
                 }
                 TuiMsg::AddActive(a) => {
-                    add_to_active(conn, &a)?;
-                    tui.update(conn)?;
+                    db.add_to_active(&a)?;
+                    tui.update(db)?;
                 }
             }
         }

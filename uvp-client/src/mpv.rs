@@ -1,13 +1,10 @@
-use crate::data::{
-    find_in_active, make_active, remove_from_active, set_duration, set_position_secs, set_title,
-};
-use rusqlite::Connection;
+use uvp_state::data::{ignore_constraint_errors, Database};
 
 const END_DETECTION_TOLERANCE_SECONDS: f64 = 1.0;
 
-pub fn play(conn: &Connection, url: &str, mpv_binary: &str) -> Result<(), rusqlite::Error> {
-    crate::ignore_constraint_errors(make_active(conn, url))?;
-    let active = find_in_active(conn, url)?.unwrap();
+pub fn play(db: &Database, url: &str, mpv_binary: &str) -> Result<(), crate::Error> {
+    ignore_constraint_errors(db.make_active(url))?;
+    let active = db.find_in_active(url)?.unwrap();
 
     let tmp_dir = tempfile::tempdir().unwrap();
 
@@ -60,17 +57,17 @@ pub fn play(conn: &Connection, url: &str, mpv_binary: &str) -> Result<(), rusqli
         && playback_time.is_some()
         && playback_time.unwrap() >= duration_secs.unwrap() - END_DETECTION_TOLERANCE_SECONDS
     {
-        remove_from_active(conn, &active.url)?;
+        db.remove_from_active(&active.url)?;
     } else {
         if let Some(t) = playback_time {
-            set_position_secs(conn, &active.url, t)?;
+            db.set_position_secs(&active.url, t)?;
         }
         if let Some(d) = duration_secs {
-            set_duration(conn, &active.url, d)?;
+            db.set_duration(&active.url, d)?;
         }
     }
     if let (Some(new_title), None) = (title, active.title) {
-        set_title(conn, &active.url, &new_title)?;
+        db.set_title(&active.url, &new_title)?;
     }
     output.wait().unwrap();
     Ok(())
