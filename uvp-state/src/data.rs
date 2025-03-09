@@ -88,7 +88,7 @@ const TABLE_DEFINITIONS: &[&str] = &[
 ];
 
 impl Store for Database {
-    fn iter_feeds(&self) -> Result<Vec<Feed>, crate::Error> {
+    fn all_feeds(&self) -> Result<Vec<Feed>, crate::Error> {
         let mut stmt = self.connection.prepare(
             r#"
         SELECT feedurl, title, lastupdate FROM feed
@@ -216,7 +216,7 @@ impl Store for Database {
         Ok(())
     }
 
-    fn iter_active(&self) -> Result<Vec<Active>, crate::Error> {
+    fn all_active(&self) -> Result<Vec<Active>, crate::Error> {
         let mut stmt = self.connection.prepare(
             r#"
         SELECT title, url, position_secs, duration_secs, feed_title
@@ -293,7 +293,7 @@ impl Store for Database {
             })
         }
     }
-    fn set_position_secs(&self, url: &str, position_secs: f64) -> Result<(), crate::Error> {
+    fn set_position(&self, url: &str, position_secs: f64) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
         UPDATE active SET position_secs = ?1 WHERE url = ?2
@@ -332,21 +332,21 @@ impl Store for Database {
 }
 
 pub trait Store {
-    fn iter_feeds(&self) -> Result<Vec<Feed>, crate::Error>;
+    fn all_feeds(&self) -> Result<Vec<Feed>, crate::Error>;
     fn add_to_feed(&self, feed: &Feed) -> Result<(), crate::Error>;
     fn remove_feed(&self, url: &str) -> Result<(), crate::Error>;
+    fn set_last_update(&self, url: &str, update: DateTime) -> Result<(), crate::Error>;
 
     fn all_available(&self) -> Result<Vec<Available>, crate::Error>;
     fn find_in_available(&self, url: &str) -> Result<Option<Available>, crate::Error>;
     fn remove_from_available(&self, url: &str) -> Result<(), crate::Error>;
     fn add_to_available(&self, available: &Available) -> Result<(), crate::Error>;
-    fn set_last_update(&self, url: &str, update: DateTime) -> Result<(), crate::Error>;
 
-    fn iter_active(&self) -> Result<Vec<Active>, crate::Error>;
+    fn all_active(&self) -> Result<Vec<Active>, crate::Error>;
     fn find_in_active(&self, url: &str) -> Result<Option<Active>, crate::Error>;
     fn add_to_active(&self, active: &Active) -> Result<(), crate::Error>;
     fn make_active(&self, url: &str) -> Result<(), crate::Error>;
-    fn set_position_secs(&self, url: &str, position_secs: f64) -> Result<(), crate::Error>;
+    fn set_position(&self, url: &str, position_secs: f64) -> Result<(), crate::Error>;
     fn set_duration(&self, url: &str, duration_secs: f64) -> Result<(), crate::Error>;
     fn set_title(&self, url: &str, title: &str) -> Result<(), crate::Error>;
     fn remove_from_active(&self, url: &str) -> Result<(), crate::Error>;
@@ -357,7 +357,7 @@ pub trait Store {
             .build()
             .unwrap();
         let fetches =
-            futures_util::future::join_all(self.iter_feeds()?.into_iter().map(|feed| async {
+            futures_util::future::join_all(self.all_feeds()?.into_iter().map(|feed| async {
                 let fetch_result = fetch(&client, &feed.url).await;
                 (fetch_result, feed)
             }));

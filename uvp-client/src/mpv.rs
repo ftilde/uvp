@@ -60,7 +60,7 @@ pub fn play(store: &dyn Store, url: &str, mpv_binary: &str) -> Result<(), crate:
         store.remove_from_active(&active.url)?;
     } else {
         if let Some(t) = playback_time {
-            store.set_position_secs(&active.url, t)?;
+            store.set_position(&active.url, t)?;
         }
         if let Some(d) = duration_secs {
             store.set_duration(&active.url, d)?;

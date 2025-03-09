@@ -402,16 +402,15 @@ impl Tui<'_> {
                 filter.map_or(true, |f| r.feed.title.contains(f) || r.title.contains(f))
             }),
         );
-        self.active
-            .update(db.iter_active()?.into_iter().filter(|r| {
-                filter.map_or(true, |f| {
-                    r.title.as_ref().map(|t| t.contains(f)).unwrap_or(false)
-                        || r.feed_title
-                            .as_ref()
-                            .map(|ft| ft.contains(f))
-                            .unwrap_or(false)
-                })
-            }));
+        self.active.update(db.all_active()?.into_iter().filter(|r| {
+            filter.map_or(true, |f| {
+                r.title.as_ref().map(|t| t.contains(f)).unwrap_or(false)
+                    || r.feed_title
+                        .as_ref()
+                        .map(|ft| ft.contains(f))
+                        .unwrap_or(false)
+            })
+        }));
         Ok(())
     }
 
@@ -477,7 +476,7 @@ pub fn run(store: &dyn Store, mpv_binary: &str, theme: &Theme) -> Result<(), cra
             PromptLine::with_prompt("filter > ".to_string()),
         )]
         .into(),
-        active: ActiveTable::with_active(store.iter_active()?.into_iter(), theme),
+        active: ActiveTable::with_active(store.all_active()?.into_iter(), theme),
         available: AvailableTable::with_available(store.all_available()?.into_iter(), theme),
     };
 

@@ -314,7 +314,7 @@ fn main() -> Result<(), Error> {
         Options::List(what) => match what {
             List::Feeds => {
                 println!("{} \t| {} \t| {}", "Title", "Last Update", "Url");
-                for feed in store.iter_feeds()? {
+                for feed in store.all_feeds()? {
                     println!(
                         "{} \t| {} \t| {}",
                         feed.title,
@@ -338,7 +338,7 @@ fn main() -> Result<(), Error> {
             }
             List::Active => {
                 println!("{} \t| {} \t| {}", "Title", "Url", "Playback");
-                for entry in store.iter_active()? {
+                for entry in store.all_active()? {
                     let title = entry.title.unwrap_or("Unknown".to_string());
                     println!("{} \t| {} \t {}", title, entry.url, entry.position_secs);
                 }
