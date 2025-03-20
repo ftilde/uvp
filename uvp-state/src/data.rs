@@ -206,7 +206,7 @@ impl Store for Database {
         Ok(())
     }
 
-    fn set_last_update(&self, url: &str, update: DateTime) -> Result<(), crate::Error> {
+    fn set_last_update(&self, url: &str, update: &DateTime) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
                 UPDATE feed SET lastupdate = ?1 WHERE feedurl = ?2
@@ -293,7 +293,7 @@ impl Store for Database {
             })
         }
     }
-    fn set_position(&self, url: &str, position_secs: f64) -> Result<(), crate::Error> {
+    fn set_position(&self, url: &str, position_secs: &f64) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
         UPDATE active SET position_secs = ?1 WHERE url = ?2
@@ -302,7 +302,7 @@ impl Store for Database {
         )?;
         Ok(())
     }
-    fn set_duration(&self, url: &str, duration_secs: f64) -> Result<(), crate::Error> {
+    fn set_duration(&self, url: &str, duration_secs: &f64) -> Result<(), crate::Error> {
         self.connection.execute(
             r#"
         UPDATE active SET duration_secs = ?1 WHERE url = ?2
@@ -335,7 +335,7 @@ pub trait Store {
     fn all_feeds(&self) -> Result<Vec<Feed>, crate::Error>;
     fn add_to_feed(&self, feed: &Feed) -> Result<(), crate::Error>;
     fn remove_feed(&self, url: &str) -> Result<(), crate::Error>;
-    fn set_last_update(&self, url: &str, update: DateTime) -> Result<(), crate::Error>;
+    fn set_last_update(&self, url: &str, update: &DateTime) -> Result<(), crate::Error>;
 
     fn all_available(&self) -> Result<Vec<Available>, crate::Error>;
     fn find_in_available(&self, url: &str) -> Result<Option<Available>, crate::Error>;
@@ -346,8 +346,8 @@ pub trait Store {
     fn find_in_active(&self, url: &str) -> Result<Option<Active>, crate::Error>;
     fn add_to_active(&self, active: &Active) -> Result<(), crate::Error>;
     fn make_active(&self, url: &str) -> Result<(), crate::Error>;
-    fn set_position(&self, url: &str, position_secs: f64) -> Result<(), crate::Error>;
-    fn set_duration(&self, url: &str, duration_secs: f64) -> Result<(), crate::Error>;
+    fn set_position(&self, url: &str, position_secs: &f64) -> Result<(), crate::Error>;
+    fn set_duration(&self, url: &str, duration_secs: &f64) -> Result<(), crate::Error>;
     fn set_title(&self, url: &str, title: &str) -> Result<(), crate::Error>;
     fn remove_from_active(&self, url: &str) -> Result<(), crate::Error>;
 
@@ -406,7 +406,7 @@ pub trait Store {
                 }
             }
             if let Some(lastpublication) = lastpublication {
-                self.set_last_update(&feed.url, lastpublication)?;
+                self.set_last_update(&feed.url, &lastpublication)?;
             }
         }
         Ok(())

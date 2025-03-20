@@ -3,7 +3,7 @@ use uvp_state::data::{ignore_constraint_errors, Store};
 const END_DETECTION_TOLERANCE_SECONDS: f64 = 1.0;
 
 pub fn play(store: &dyn Store, url: &str, mpv_binary: &str) -> Result<(), crate::Error> {
-    ignore_constraint_errors(store.make_active(url))?;
+    ignore_constraint_errors(store.make_active(&url))?;
     let active = store.find_in_active(url)?.unwrap();
 
     let tmp_dir = tempfile::tempdir().unwrap();
@@ -60,10 +60,10 @@ pub fn play(store: &dyn Store, url: &str, mpv_binary: &str) -> Result<(), crate:
         store.remove_from_active(&active.url)?;
     } else {
         if let Some(t) = playback_time {
-            store.set_position(&active.url, t)?;
+            store.set_position(&active.url, &t)?;
         }
         if let Some(d) = duration_secs {
-            store.set_duration(&active.url, d)?;
+            store.set_duration(&active.url, &d)?;
         }
     }
     if let (Some(new_title), None) = (title, active.title) {

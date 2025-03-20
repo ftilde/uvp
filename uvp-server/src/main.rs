@@ -12,6 +12,36 @@ struct CliArgs {
     db: PathBuf,
 }
 
+macro_rules! build_fn {
+    ($db:ident, fn $fn_name:ident (&self $(, $arg:ident : &$type:ty)+) -> $ret:ty;) => {
+            get(move |Json(($($arg,)*)): Json::<($($type,)*)>| async move {
+                let db = $db.lock().await;
+                let res = db.$fn_name($(&$arg,)*).unwrap();
+                Json(res)
+            })
+    };
+    ($db:ident, fn $fn_name:ident (&self) -> $ret:ty;) => {
+            get(move || async move {
+                let db = $db.lock().await;
+                let res = db.$fn_name().unwrap();
+                Json(res)
+            })
+    };
+}
+
+macro_rules! build_router {
+    ($db:ident; $(fn $fn_name:ident (&self $(,$arg:ident : &$type:ty)*) -> $ret:ty;)*) => {
+        Router::new()
+
+            $(
+            .route(
+                std::stringify!($fn_name),
+                build_fn!{$db, fn $fn_name(&self $(, $arg : &$type)*) -> $ret;}
+            )
+            )*
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let args = CliArgs::parse();
@@ -19,142 +49,28 @@ async fn main() {
     let db = uvp_state::data::Database::new(&args.db).unwrap();
     let db = &*Box::leak(Box::new(tokio::sync::Mutex::new(db)));
 
-    // build our application with a single route
-    let app = Router::new()
-        .route(
-            "/all_feeds",
-            get(move || async move {
-                let db = db.lock().await;
-                let res = db.all_feeds().unwrap();
-                Json(res)
-            }),
-        )
-        .route(
-            "/add_to_feed",
-            get(move |feed: Json<Feed>| async move {
-                let db = db.lock().await;
-                let res = db.add_to_feed(&feed.0).unwrap();
-                Json(res)
-            }),
-        )
-        .route(
-            "/remove_feed",
-            get(move |url: Json<String>| async move {
-                let db = db.lock().await;
-                let res = db.remove_feed(&url.0).unwrap();
-                Json(res)
-            }),
-        )
-        .route(
-            "/set_last_update",
-            get(
-                move |Json((url, update)): Json<(String, DateTime)>| async move {
-                    let db = db.lock().await;
-                    let res = db.set_last_update(&url, update).unwrap();
-                    Json(res)
-                },
-            ),
-        )
-        .route(
-            "/all_available",
-            get(move || async move {
-                let db = db.lock().await;
-                let res = db.all_available().unwrap();
-                Json(res)
-            }),
-        )
-        .route(
-            "/find_in_available",
-            get(move |Json(url): Json<String>| async move {
-                println!("jo");
-                let db = db.lock().await;
-                let res = db.find_in_available(&url).unwrap();
-                Json(res)
-            }),
-        )
-        .route(
-            "/remove_from_available",
-            get(move |Json(url): Json<String>| async move {
-                let db = db.lock().await;
-                let res = db.remove_from_available(&url).unwrap();
-                Json(res)
-            }),
-        )
-        .route(
-            "/add_to_available",
-            get(move |v: Json<Available>| async move {
-                let db = db.lock().await;
-                db.add_to_available(&v.0).unwrap();
-            }),
-        )
-        .route(
-            "/all_active",
-            get(move || async move {
-                let db = db.lock().await;
-                let active = db.all_active().unwrap();
-                Json(active)
-            }),
-        )
-        .route(
-            "/find_in_active",
-            get(move |Json(url): Json<String>| async move {
-                let db = db.lock().await;
-                let res = db.find_in_active(&url).unwrap();
-                Json(res)
-            }),
-        )
-        .route(
-            "/add_to_active",
-            get(move |Json(active): Json<Active>| async move {
-                let db = db.lock().await;
-                let res = db.add_to_active(&active).unwrap();
-                Json(res)
-            }),
-        )
-        .route(
-            "/make_active",
-            get(move |Json(url): Json<String>| async move {
-                let db = db.lock().await;
-                let res = db.make_active(&url).unwrap();
-                Json(res)
-            }),
-        )
-        .route(
-            "/set_position",
-            get(move |Json((url, pos)): Json<(String, f64)>| async move {
-                let db = db.lock().await;
-                let res = db.set_position(&url, pos).unwrap();
-                Json(res)
-            }),
-        )
-        .route(
-            "/set_duration",
-            get(
-                move |Json((url, duration)): Json<(String, f64)>| async move {
-                    let db = db.lock().await;
-                    let res = db.set_duration(&url, duration).unwrap();
-                    Json(res)
-                },
-            ),
-        )
-        .route(
-            "/set_title",
-            get(
-                move |Json((url, title)): Json<(String, String)>| async move {
-                    let db = db.lock().await;
-                    let res = db.set_title(&url, &title).unwrap();
-                    Json(res)
-                },
-            ),
-        )
-        .route(
-            "/remove_from_active",
-            get(move |Json(url): Json<String>| async move {
-                let db = db.lock().await;
-                let res = db.remove_from_active(&url).unwrap();
-                Json(res)
-            }),
-        );
+    // Methods copied from Store trait:
+    let app = build_router!(
+        db;
+        fn all_feeds(&self) -> Result<Vec<Feed>, crate::Error>;
+        fn add_to_feed(&self, feed: &Feed) -> Result<(), crate::Error>;
+        fn remove_feed(&self, url: &String) -> Result<(), crate::Error>;
+        fn set_last_update(&self, url: &String, update: &DateTime) -> Result<(), crate::Error>;
+
+        fn all_available(&self) -> Result<Vec<Available>, crate::Error>;
+        fn find_in_available(&self, url: &String) -> Result<Option<Available>, crate::Error>;
+        fn remove_from_available(&self, url: &String) -> Result<(), crate::Error>;
+        fn add_to_available(&self, available: &Available) -> Result<(), crate::Error>;
+
+        fn all_active(&self) -> Result<Vec<Active>, crate::Error>;
+        fn find_in_active(&self, url: &String) -> Result<Option<Active>, crate::Error>;
+        fn add_to_active(&self, active: &Active) -> Result<(), crate::Error>;
+        fn make_active(&self, url: &String) -> Result<(), crate::Error>;
+        fn set_position(&self, url: &String, position_secs: &f64) -> Result<(), crate::Error>;
+        fn set_duration(&self, url: &String, duration_secs: &f64) -> Result<(), crate::Error>;
+        fn set_title(&self, url: &String, title: &String) -> Result<(), crate::Error>;
+        fn remove_from_active(&self, url: &String) -> Result<(), crate::Error>;
+    );
 
     // run our app with hyper, listening globally on port 3000
     let listener = tokio::net::TcpListener::bind("localhost:3000")
