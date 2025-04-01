@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use axum::{routing::get, Json, Router};
+use axum::{routing::post, Json, Router};
 use uvp_state::data::{Active, Available, DateTime, Feed, Store};
 
 use clap::Parser;
@@ -18,14 +18,14 @@ macro_rules! owned (
 
 macro_rules! build_fn {
     ($db:ident, fn $fn_name:ident (&self $(, $arg:ident : &$type:ty)+) -> $ret:ty;) => {
-            get(move |Json(($($arg,)*)): Json::<($(owned!($type),)*)>| async move {
+            post(move |Json(($($arg,)*)): Json::<($(owned!($type),)*)>| async move {
                 let db = $db.lock().await;
                 let res = db.$fn_name($(&$arg,)*).unwrap();
                 Json(res)
             })
     };
     ($db:ident, fn $fn_name:ident (&self) -> $ret:ty;) => {
-            get(move || async move {
+            post(move || async move {
                 let db = $db.lock().await;
                 let res = db.$fn_name().unwrap();
                 Json(res)
