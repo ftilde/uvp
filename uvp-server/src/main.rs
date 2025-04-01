@@ -39,7 +39,7 @@ macro_rules! build_router {
 
             $(
             .route(
-                std::stringify!($fn_name),
+                std::concat!("/", std::stringify!($fn_name)),
                 build_fn!{$db, fn $fn_name(&self $(, $arg : &$type)*) -> $ret;}
             )
             )*
