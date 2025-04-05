@@ -261,6 +261,7 @@ fn main() -> Result<(), Error> {
     //let flags = OpenFlags::SQLITE_OPEN_FULL_MUTEX;
     //let conn = Connection::open_with_flags(db_path, flags).unwrap();
     let db = uvp_state::data::Database::new(Path::new(&db_path)).unwrap();
+    //let db = uvp_state::data::HttpStore::new("http://localhost:3000");
     let store: Box<dyn Store> = Box::new(db);
 
     match Options::from_args() {

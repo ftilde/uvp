@@ -1,7 +1,8 @@
-use std::path::Path;
+use std::{path::Path, str::FromStr};
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::feeds::fetch;
 
@@ -274,7 +275,7 @@ impl Store for Database {
     }
 
     fn make_active(&self, url: &str) -> Result<(), crate::Error> {
-        if let Some(available) = self.find_in_available(url)? {
+        ignore_constraint_errors(if let Some(available) = self.find_in_available(url)? {
             self.add_to_active(&Active {
                 url: url.to_owned(),
                 title: Some(available.title),
@@ -291,7 +292,7 @@ impl Store for Database {
                 duration_secs: None,
                 feed_title: None,
             })
-        }
+        })
     }
     fn set_position(&self, url: &str, position_secs: &f64) -> Result<(), crate::Error> {
         self.connection.execute(
@@ -411,6 +412,73 @@ pub trait Store {
         }
         Ok(())
     }
+}
+
+pub struct HttpStore(reqwest::blocking::Client, Url);
+
+impl HttpStore {
+    pub fn new(url: &str) -> Self {
+        let url = Url::from_str(url).unwrap();
+        Self(reqwest::blocking::Client::new(), url)
+    }
+}
+
+macro_rules! build_fn {
+    (fn $fn_name:ident (&self $(, $arg:ident : &$type:ty)+) -> $ret:ty;) => {
+        fn $fn_name (&self $(, $arg : &$type)+) -> $ret {
+            let url = self.1.join(stringify!($fn_name)).unwrap();
+            let body = serde_json::to_string(&($($arg,)*))?;
+            eprintln!(">>>> send {} with body {}", stringify!($fn_name), body);
+            let result = self
+                .0
+                .post(url)
+                .header("Content-Type", "application/json")
+                .body(body)
+                .send()?
+                .bytes()?;
+            eprintln!(">>>> result {:?}", result);
+            Ok(serde_json::from_slice(&*result)?)
+        }
+    };
+    (fn $fn_name:ident (&self) -> $ret:ty;) => {
+        fn $fn_name(&self) -> $ret {
+            let url = self.1.join(stringify!($fn_name)).unwrap();
+            let result = self.0.post(url).send()?.bytes()?;
+            Ok(serde_json::from_slice(&*result)?)
+        }
+    };
+}
+
+macro_rules! build_httpstore {
+    ($(fn $fn_name:ident (&self $(,$arg:ident : &$type:ty)*) -> $ret:ty;)*) => {
+    impl Store for HttpStore {
+            $(
+                build_fn!{fn $fn_name(&self $(, $arg : &$type)*) -> $ret;}
+            )*
+    }
+    }
+}
+
+build_httpstore! {
+    fn all_feeds(&self) -> Result<Vec<Feed>, crate::Error>;
+
+    fn add_to_feed(&self, feed: &Feed) -> Result<(), crate::Error>;
+    fn remove_feed(&self, url: &str) -> Result<(), crate::Error>;
+    fn set_last_update(&self, url: &str, update: &DateTime) -> Result<(), crate::Error>;
+
+    fn all_available(&self) -> Result<Vec<Available>, crate::Error>;
+    fn find_in_available(&self, url: &str) -> Result<Option<Available>, crate::Error>;
+    fn remove_from_available(&self, url: &str) -> Result<(), crate::Error>;
+    fn add_to_available(&self, available: &Available) -> Result<(), crate::Error>;
+
+    fn all_active(&self) -> Result<Vec<Active>, crate::Error>;
+    fn find_in_active(&self, url: &str) -> Result<Option<Active>, crate::Error>;
+    fn add_to_active(&self, active: &Active) -> Result<(), crate::Error>;
+    fn make_active(&self, url: &str) -> Result<(), crate::Error>;
+    fn set_position(&self, url: &str, position_secs: &f64) -> Result<(), crate::Error>;
+    fn set_duration(&self, url: &str, duration_secs: &f64) -> Result<(), crate::Error>;
+    fn set_title(&self, url: &str, title: &str) -> Result<(), crate::Error>;
+    fn remove_from_active(&self, url: &str) -> Result<(), crate::Error>;
 }
 
 pub fn ignore_constraint_errors(res: Result<(), crate::Error>) -> Result<(), crate::Error> {

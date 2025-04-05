@@ -1,9 +1,9 @@
-use uvp_state::data::{ignore_constraint_errors, Store};
+use uvp_state::data::Store;
 
 const END_DETECTION_TOLERANCE_SECONDS: f64 = 1.0;
 
 pub fn play(store: &dyn Store, url: &str, mpv_binary: &str) -> Result<(), crate::Error> {
-    ignore_constraint_errors(store.make_active(&url))?;
+    store.make_active(&url)?;
     let active = store.find_in_active(url)?.unwrap();
 
     let tmp_dir = tempfile::tempdir().unwrap();

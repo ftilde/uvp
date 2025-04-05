@@ -7,6 +7,7 @@ pub enum Error {
     RSS(rss::Error),
     Atom(atom_syndication::Error),
     DB(rusqlite::Error),
+    Parse(serde_json::Error),
 }
 
 impl From<reqwest::Error> for Error {
@@ -27,6 +28,11 @@ impl From<atom_syndication::Error> for Error {
 impl From<rusqlite::Error> for Error {
     fn from(error: rusqlite::Error) -> Self {
         Error::DB(error)
+    }
+}
+impl From<serde_json::Error> for Error {
+    fn from(error: serde_json::Error) -> Self {
+        Error::Parse(error)
     }
 }
 

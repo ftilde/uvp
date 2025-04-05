@@ -21,6 +21,7 @@ macro_rules! build_fn {
             post(move |Json(($($arg,)*)): Json::<($(owned!($type),)*)>| async move {
                 let db = $db.lock().await;
                 let res = db.$fn_name($(&$arg,)*).unwrap();
+                println!(">>>> Call {}, res {:?}", stringify!($fn_name), res);
                 Json(res)
             })
     };
@@ -28,6 +29,7 @@ macro_rules! build_fn {
             post(move || async move {
                 let db = $db.lock().await;
                 let res = db.$fn_name().unwrap();
+                println!(">>>> Call {}, res {:?}", stringify!($fn_name), res);
                 Json(res)
             })
     };
