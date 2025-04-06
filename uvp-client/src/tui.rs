@@ -566,6 +566,9 @@ pub fn run(store: &dyn Store, mpv_binary: &str, theme: &Theme) -> Result<(), cra
                             input
                                 .chain((Key::Char('q'), || run = false))
                                 .chain((Key::Char('r'), || {
+                                    work_sender.send(TuiMsg::Redraw).unwrap()
+                                }))
+                                .chain((Key::Char('R'), || {
                                     work_sender.send(TuiMsg::Refresh).unwrap()
                                 }))
                                 .chain((Key::Char('f'), || tui.switch_mode(Mode::Filter)))
