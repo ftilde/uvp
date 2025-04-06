@@ -12,7 +12,11 @@ mod tui;
 
 const DB_NAME: &'static str = "uvp.db";
 const CONFIG_FILE_NAME: &'static str = "uvp.toml";
+const STORE_TYPE_CONFIG_KEY: &'static str = "store_type";
+const STORE_TYPE_VALUE_SQLITE: &'static str = "sqlite";
+const STORE_TYPE_VALUE_SERVER: &'static str = "server";
 const DB_FILE_CONFIG_KEY: &'static str = "database_file";
+const SERVER_URL_CONFIG_KEY: &'static str = "server_url";
 const MPV_BINARY_CONFIG_KEY: &'static str = "mpv_binary";
 const THEME_CONFIG_KEY: &'static str = "theme";
 
@@ -85,8 +89,7 @@ enum List {
 }
 
 #[derive(StructOpt)]
-#[structopt(author, about)]
-enum Options {
+enum Command {
     #[structopt(about = "Add a feed or video")]
     Add(Add),
     #[structopt(about = "Refresh the list of available videos")]
@@ -99,6 +102,15 @@ enum Options {
     Remove(Remove),
     #[structopt(about = "Start an interactive tui for video selection")]
     Tui,
+}
+
+#[derive(StructOpt)]
+#[structopt(author, about)]
+struct Options {
+    #[structopt(short = "c", about = "Path to config file")]
+    config: Option<PathBuf>,
+    #[structopt(subcommand)]
+    command: Command,
 }
 
 fn youtube_url_user(channel: &str) -> String {
@@ -223,11 +235,14 @@ impl From<Theme> for config::Value {
 }
 
 fn main() -> Result<(), Error> {
+    let options = Options::from_args();
+
     let default_db_path = dirs::data_dir()
         .unwrap_or(Path::new("./").to_owned())
         .join(DB_NAME);
 
     let mut settings_builder = config::Config::builder()
+        .set_default(STORE_TYPE_CONFIG_KEY, STORE_TYPE_VALUE_SQLITE)?
         .set_default(
             DB_FILE_CONFIG_KEY,
             default_db_path.to_string_lossy().as_ref(),
@@ -235,43 +250,60 @@ fn main() -> Result<(), Error> {
         .set_default(MPV_BINARY_CONFIG_KEY, "mpv")?
         .set_default(THEME_CONFIG_KEY, Theme::default())?;
 
-    for config_location in vec![
+    let fixed_config_locations = vec![
         Some(PathBuf::from("/etc")),
         Some(PathBuf::from("/usr/etc")),
         dirs::config_dir(),
-    ] {
-        if let Some(config_location) = config_location {
-            let config_file = config_location.join(CONFIG_FILE_NAME);
-            if config_file.is_file() {
-                settings_builder = settings_builder.add_source(config::File::new(
-                    config_file.to_str().unwrap(),
-                    config::FileFormat::Toml,
-                ));
-            }
+    ];
+
+    let config_files = fixed_config_locations
+        .into_iter()
+        .filter_map(|l| l.map(|l| l.join(CONFIG_FILE_NAME)))
+        .chain(options.config.into_iter());
+
+    for config_file in config_files {
+        if config_file.is_file() {
+            settings_builder = settings_builder.add_source(config::File::new(
+                config_file.to_str().unwrap(),
+                config::FileFormat::Toml,
+            ));
         }
     }
 
     let settings = settings_builder.build()?;
 
-    let db_path = settings.get_string(DB_FILE_CONFIG_KEY).unwrap();
     let mpv_binary = settings.get_string(MPV_BINARY_CONFIG_KEY).unwrap();
 
     let theme: Theme = settings.get_table(THEME_CONFIG_KEY)?.try_into()?;
 
-    //let flags = OpenFlags::SQLITE_OPEN_FULL_MUTEX;
-    //let conn = Connection::open_with_flags(db_path, flags).unwrap();
-    let db = uvp_state::data::Database::new(Path::new(&db_path)).unwrap();
-    //let db = uvp_state::data::HttpStore::new("http://localhost:3000");
-    let store: Box<dyn Store> = Box::new(db);
+    let store: Box<dyn Store> = match settings.get_string(STORE_TYPE_CONFIG_KEY).unwrap().as_str() {
+        STORE_TYPE_VALUE_SQLITE => {
+            eprintln!("Using sqlite store");
+            let db_path = settings.get_string(DB_FILE_CONFIG_KEY).unwrap();
+            let db = uvp_state::data::Database::new(Path::new(&db_path)).unwrap();
+            Box::new(db)
+        }
+        STORE_TYPE_VALUE_SERVER => {
+            eprintln!("Using http store");
+            let url = settings.get_string(SERVER_URL_CONFIG_KEY).unwrap();
+            let db = uvp_state::data::HttpStore::new(&url);
+            Box::new(db)
+        }
+        o => {
+            return Err(
+                config::ConfigError::Message(format!("Invalid store type {}", o).into()).into(),
+            );
+        }
+    };
 
-    match Options::from_args() {
-        Options::Add(Add::Video(vid)) => {
+    match options.command {
+        Command::Add(Add::Video(vid)) => {
             store.make_active(&vid.url)?;
         }
-        Options::Play(p) => {
+        Command::Play(p) => {
             mpv::play(&*store, &p.url, &mpv_binary)?;
         }
-        Options::Add(Add::Feed(add)) => {
+        Command::Add(Add::Feed(add)) => {
             let feed = match add {
                 AddFeed::Youtube {
                     channel_name,
@@ -312,7 +344,7 @@ fn main() -> Result<(), Error> {
             };
             store.add_to_feed(&feed)?;
         }
-        Options::List(what) => match what {
+        Command::List(what) => match what {
             List::Feeds => {
                 println!("{} \t| {} \t| {}", "Title", "Last Update", "Url");
                 for feed in store.all_feeds()? {
@@ -345,16 +377,16 @@ fn main() -> Result<(), Error> {
                 }
             }
         },
-        Options::Remove(Remove::Video { url }) => {
+        Command::Remove(Remove::Video { url }) => {
             store.remove_from_available(&url)?;
         }
-        Options::Remove(Remove::Feed { url }) => {
+        Command::Remove(Remove::Feed { url }) => {
             store.remove_feed(&url)?;
         }
-        Options::Refresh => {
+        Command::Refresh => {
             store.refresh()?;
         }
-        Options::Tui => {
+        Command::Tui => {
             tui::run(&*store, &mpv_binary, &theme)?;
         }
     }
