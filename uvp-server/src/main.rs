@@ -7,6 +7,9 @@ use clap::Parser;
 
 #[derive(Parser)]
 struct CliArgs {
+    #[arg(default_value = "localhost:3000")]
+    bind_address: String,
+
     /// Path to sqlite database which stores all state
     #[arg()]
     db: PathBuf,
@@ -78,8 +81,7 @@ async fn main() {
         fn remove_from_active(&self, url: &str) -> Result<(), crate::Error>;
     );
 
-    // run our app with hyper, listening globally on port 3000
-    let listener = tokio::net::TcpListener::bind("localhost:3000")
+    let listener = tokio::net::TcpListener::bind(args.bind_address)
         .await
         .unwrap();
     axum::serve(listener, app).await.unwrap();
