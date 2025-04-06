@@ -2,6 +2,7 @@
 #database_file = "/path/to/db/file.db"  #Used when store_type = "sqlite"
 #server_url = "http://localhost:3000"   #Used when store_type = "server"
 #mpv_binary = "/path/to/alternate/mpv"
+#refresh_on_tui_init = true
 
 #[theme]
 #primary_fg = "default"

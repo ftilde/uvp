@@ -465,8 +465,6 @@ enum InputLoopMsg {
 }
 
 pub fn run(store: &dyn Store, mpv_binary: &str, theme: &Theme) -> Result<(), crate::Error> {
-    store.refresh()?;
-
     let mut tui = Tui {
         mode: Mode::Normal,
         filter: None,

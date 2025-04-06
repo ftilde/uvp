@@ -19,6 +19,7 @@ const DB_FILE_CONFIG_KEY: &'static str = "database_file";
 const SERVER_URL_CONFIG_KEY: &'static str = "server_url";
 const MPV_BINARY_CONFIG_KEY: &'static str = "mpv_binary";
 const THEME_CONFIG_KEY: &'static str = "theme";
+const REFRESH_ON_TUI_INIT_CONFIG_KEY: &'static str = "refresh_on_tui_init";
 
 #[derive(StructOpt)]
 enum Add {
@@ -248,6 +249,7 @@ fn main() -> Result<(), Error> {
             default_db_path.to_string_lossy().as_ref(),
         )?
         .set_default(MPV_BINARY_CONFIG_KEY, "mpv")?
+        .set_default(REFRESH_ON_TUI_INIT_CONFIG_KEY, true)?
         .set_default(THEME_CONFIG_KEY, Theme::default())?;
 
     let fixed_config_locations = vec![
@@ -275,6 +277,8 @@ fn main() -> Result<(), Error> {
     let mpv_binary = settings.get_string(MPV_BINARY_CONFIG_KEY).unwrap();
 
     let theme: Theme = settings.get_table(THEME_CONFIG_KEY)?.try_into()?;
+
+    let refresh_on_tui_init = settings.get_bool(REFRESH_ON_TUI_INIT_CONFIG_KEY)?;
 
     let store: Box<dyn Store> = match settings.get_string(STORE_TYPE_CONFIG_KEY).unwrap().as_str() {
         STORE_TYPE_VALUE_SQLITE => {
@@ -387,6 +391,10 @@ fn main() -> Result<(), Error> {
             store.refresh()?;
         }
         Command::Tui => {
+            if refresh_on_tui_init {
+                store.refresh()?;
+            }
+
             tui::run(&*store, &mpv_binary, &theme)?;
         }
     }
