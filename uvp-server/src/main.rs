@@ -1,13 +1,19 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use axum::{routing::post, Json, Router};
-use uvp_state::data::{Active, Available, DateTime, Feed, Store};
+use tokio::sync::Mutex;
+use uvp_state::data::{Active, Available, Database, DateTime, Feed, Store};
 
 use clap::Parser;
 
+const REFRESH_PERIOD: Duration = Duration::from_secs(60 * 60);
+
 #[derive(Parser)]
 struct CliArgs {
-    #[arg(default_value = "localhost:3000")]
+    #[arg(long = "auto_refresh", short = 'r')]
+    auto_refresh: bool,
+
+    #[arg(long = "bind_address", short = 'L', default_value = "localhost:3000")]
     bind_address: String,
 
     /// Path to sqlite database which stores all state
@@ -51,12 +57,28 @@ macro_rules! build_router {
     }
 }
 
+fn refresh_job(db_path: PathBuf) {
+    let db = Database::new(&db_path).unwrap();
+    loop {
+        if let Err(e) = db.refresh() {
+            eprintln!("Refresh err: {:?}", e);
+        }
+
+        std::thread::sleep(REFRESH_PERIOD);
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let args = CliArgs::parse();
 
-    let db = uvp_state::data::Database::new(&args.db).unwrap();
-    let db = &*Box::leak(Box::new(tokio::sync::Mutex::new(db)));
+    if args.auto_refresh {
+        let db_path = args.db.clone();
+        std::thread::spawn(|| refresh_job(db_path));
+    }
+
+    let db = Database::new(&args.db).unwrap();
+    let db = &*Box::leak(Box::new(Mutex::new(db)));
 
     // Methods copied from Store trait:
     let app = build_router!(
