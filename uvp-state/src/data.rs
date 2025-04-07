@@ -4,11 +4,11 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::feeds::fetch;
+use crate::feeds::{fetch_async, FeedEntries};
 
 pub type DateTime = chrono::DateTime<chrono::FixedOffset>; //TODO use UTC, rusqlite has direct support for it
 
-const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+pub const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 fn parse(s: &str) -> chrono::ParseResult<DateTime> {
     DateTime::parse_from_rfc3339(s)
@@ -359,7 +359,7 @@ pub trait Store {
             .unwrap();
         let fetches =
             futures_util::future::join_all(self.all_feeds()?.into_iter().map(|feed| async {
-                let fetch_result = fetch(&client, &feed.url).await;
+                let fetch_result = fetch_async(&client, &feed.url).await;
                 (fetch_result, feed)
             }));
         let mut rt = tokio::runtime::Builder::new()
@@ -370,8 +370,6 @@ pub trait Store {
             .unwrap();
         let fetched_feeds = rt.block_on(fetches);
         for (fetch_result, feed) in fetched_feeds {
-            let mut lastpublication = feed.lastupdate;
-
             let fetched_feed = match fetch_result.map_err(|e| e.into()) {
                 Ok(feed) => feed,
                 Err(crate::Error::Reqwest(e)) => {
@@ -390,28 +388,39 @@ pub trait Store {
                     panic!("Unexpected error during fetch: {:?}", e);
                 }
             };
-            for entry in fetched_feed.entries() {
-                if feed.lastupdate.is_none() || feed.lastupdate.unwrap() < entry.publication {
-                    let available = Available {
-                        title: entry.title,
-                        url: entry.url,
-                        publication: entry.publication,
-                        feed: feed.clone(),
-                    };
-                    ignore_constraint_errors(self.add_to_available(&available))?;
-                }
-                lastpublication = if let Some(lastpublication) = lastpublication {
-                    Some(entry.publication.max(lastpublication))
-                } else {
-                    Some(entry.publication)
-                }
-            }
-            if let Some(lastpublication) = lastpublication {
-                self.set_last_update(&feed.url, &lastpublication)?;
-            }
+            update_feed(self, feed, fetched_feed)?;
         }
         Ok(())
     }
+}
+
+pub fn update_feed<S: Store + ?Sized>(
+    store: &S,
+    feed: Feed,
+    feed_result: FeedEntries,
+) -> crate::Result<()> {
+    let mut lastpublication = feed.lastupdate;
+    for entry in feed_result.entries() {
+        if feed.lastupdate.is_none() || feed.lastupdate.unwrap() < entry.publication {
+            let available = Available {
+                title: entry.title,
+                url: entry.url,
+                publication: entry.publication,
+                feed: feed.clone(),
+            };
+            ignore_constraint_errors(store.add_to_available(&available))?;
+        }
+        lastpublication = if let Some(lastpublication) = lastpublication {
+            Some(entry.publication.max(lastpublication))
+        } else {
+            Some(entry.publication)
+        }
+    }
+    if let Some(lastpublication) = lastpublication {
+        store.set_last_update(&feed.url, &lastpublication)?;
+    }
+
+    Ok(())
 }
 
 pub struct HttpStore(reqwest::blocking::Client, Url);

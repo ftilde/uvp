@@ -2,16 +2,20 @@ use std::{path::PathBuf, time::Duration};
 
 use axum::{routing::post, Json, Router};
 use tokio::sync::Mutex;
-use uvp_state::data::{Active, Available, Database, DateTime, Feed, Store};
+use uvp_state::{
+    data::{Active, Available, Database, DateTime, Feed, Store},
+    Error,
+};
 
 use clap::Parser;
 
-const REFRESH_PERIOD: Duration = Duration::from_secs(60 * 60);
+const REFRESH_WAIT_SECS_MIN: u64 = 10;
+const REFRESH_WAIT_SECS_MAX: u64 = 60;
 
 #[derive(Parser)]
 struct CliArgs {
     #[arg(long = "auto_refresh", short = 'r')]
-    auto_refresh: bool,
+    auto_refresh: Option<chrono::NaiveTime>,
 
     #[arg(long = "bind_address", short = 'L', default_value = "localhost:3000")]
     bind_address: String,
@@ -57,14 +61,71 @@ macro_rules! build_router {
     }
 }
 
-fn refresh_job(db_path: PathBuf) {
+fn refresh_job(db_path: PathBuf, refresh_time: chrono::NaiveTime) {
     let db = Database::new(&db_path).unwrap();
-    loop {
-        if let Err(e) = db.refresh() {
-            eprintln!("Refresh err: {:?}", e);
-        }
 
-        std::thread::sleep(REFRESH_PERIOD);
+    let client = reqwest::blocking::ClientBuilder::new()
+        .timeout(uvp_state::data::FETCH_TIMEOUT)
+        .build()
+        .unwrap();
+
+    loop {
+        let now = chrono::Local::now();
+        let today = now.date_naive();
+        let update_today = today.and_time(refresh_time);
+        let next_update = if update_today > now.naive_local() {
+            update_today
+        } else {
+            today.succ_opt().unwrap().and_time(refresh_time)
+        };
+
+        let sleep_time = next_update
+            .signed_duration_since(now.naive_local())
+            .to_std()
+            .unwrap();
+
+        eprintln!("Sleeping {} secs until next refresh", sleep_time.as_secs());
+
+        std::thread::sleep(sleep_time);
+
+        let mut feeds = db.all_feeds().unwrap();
+
+        use rand::seq::SliceRandom;
+        let mut r = rand::rng();
+        feeds.shuffle(&mut r);
+
+        for feed in feeds {
+            let wait_duration = Duration::from_secs(rand::random_range(
+                REFRESH_WAIT_SECS_MIN..REFRESH_WAIT_SECS_MAX,
+            ));
+            eprintln!("Waiting {} secs before next fetch", wait_duration.as_secs());
+
+            std::thread::sleep(wait_duration);
+            let fetch_result = uvp_state::feeds::fetch(&client, &feed.url);
+
+            let fetched_feed = match fetch_result.map_err(|e| e.into()) {
+                Ok(feed) => feed,
+                Err(Error::Reqwest(e)) => {
+                    eprintln!("Failed to fetch feed {}: {}", feed.title, e);
+                    continue;
+                }
+                Err(Error::RSS(e)) => {
+                    eprintln!("Failed to parse feed {}: {}", feed.title, e);
+                    continue;
+                }
+                Err(Error::Atom(e)) => {
+                    eprintln!("Failed to parse feed {}: {}", feed.title, e);
+                    continue;
+                }
+                Err(e) => {
+                    eprintln!("Unexpected error during fetch {}: {:?}", feed.title, e);
+                    continue;
+                }
+            };
+            if let Err(e) = uvp_state::data::update_feed(&db, feed, fetched_feed) {
+                eprintln!("Failed to update feed: {:?}", e);
+            }
+        }
     }
 }
 
@@ -72,9 +133,9 @@ fn refresh_job(db_path: PathBuf) {
 async fn main() {
     let args = CliArgs::parse();
 
-    if args.auto_refresh {
+    if let Some(time) = args.auto_refresh {
         let db_path = args.db.clone();
-        std::thread::spawn(|| refresh_job(db_path));
+        std::thread::spawn(move || refresh_job(db_path, time));
     }
 
     let db = Database::new(&args.db).unwrap();
