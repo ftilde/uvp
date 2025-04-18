@@ -437,7 +437,6 @@ macro_rules! build_fn {
         fn $fn_name (&self $(, $arg : &$type)+) -> $ret {
             let url = self.1.join(stringify!($fn_name)).unwrap();
             let body = serde_json::to_string(&($($arg,)*))?;
-            eprintln!(">>>> send {} with body {}", stringify!($fn_name), body);
             let result = self
                 .0
                 .post(url)
@@ -445,7 +444,6 @@ macro_rules! build_fn {
                 .body(body)
                 .send()?
                 .bytes()?;
-            eprintln!(">>>> result {:?}", result);
             Ok(serde_json::from_slice(&*result)?)
         }
     };
