@@ -275,24 +275,24 @@ impl Store for Database {
     }
 
     fn make_active(&self, url: &str) -> Result<(), crate::Error> {
-        ignore_constraint_errors(if let Some(available) = self.find_in_available(url)? {
-            self.add_to_active(&Active {
+        if let Some(available) = self.find_in_available(url)? {
+            ignore_constraint_errors(self.add_to_active(&Active {
                 url: url.to_owned(),
                 title: Some(available.title),
                 position_secs: 0.0,
                 duration_secs: None,
                 feed_title: Some(available.feed.title),
-            })?;
+            }))?;
             self.remove_from_available(url)
         } else {
-            self.add_to_active(&Active {
+            ignore_constraint_errors(self.add_to_active(&Active {
                 url: url.to_owned(),
                 title: None,
                 position_secs: 0.0,
                 duration_secs: None,
                 feed_title: None,
-            })
-        })
+            }))
+        }
     }
     fn set_position(&self, url: &str, position_secs: &f64) -> Result<(), crate::Error> {
         self.connection.execute(
